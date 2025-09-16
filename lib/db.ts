@@ -3,315 +3,256 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 
-/* ---------- open / ensure file ---------- */
+/**
+ * DB path:
+ * - On Vercel, default to /tmp/app.db (writable but ephemeral)
+ * - Else use ./data/app.db (make sure the folder is writable on VPS/local)
+ */
 const DB_PATH =
-  process.env.DATABASE_PATH || path.join(process.cwd(), "data", "app.db");
+  process.env.DATABASE_PATH ||
+  (process.env.VERCEL ? "/tmp/app.db" : path.join(process.cwd(), "data", "app.db"));
+
+/** ensure parent dir exists */
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+/** single process-wide connection (better-sqlite3 is sync) */
 export const db = new Database(DB_PATH);
 
-/* ---------- utils ---------- */
-const digitsOnly = (s: string | null | undefined) =>
-  (s ?? "").replace(/\D+/g, "");
-
-function tableExists(name: string) {
-  const row = db
-  .prepare<[number], LeadRow>("SELECT * FROM leads WHERE id = ?")
-  .get(Number(info.lastInsertRowid));
-}
-function columnExists(table: string, column: string) {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
-  return rows.some((r) => r && r.name === column);
-}
-
 /* ===========================
-   leads
+   Types
 =========================== */
-if (!tableExists("leads")) {
-  db.exec(`
-    CREATE TABLE leads (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      name          TEXT,
-      email         TEXT,
-      gender        TEXT,
-      age           INTEGER,
-      country_iso   TEXT,
-      dial          TEXT,
-      phone_raw     TEXT,
-      phone_e164    TEXT,
-      phone_digits  TEXT,
-      ip            TEXT,
-      created_at    TEXT DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at);
-    CREATE INDEX IF NOT EXISTS idx_leads_e164    ON leads(phone_e164);
-    CREATE INDEX IF NOT EXISTS idx_leads_digits  ON leads(phone_digits);
-  `);
-  console.log("[DB] Created table leads");
-} else {
-  for (const col of [
-    "age",
-    "country_iso",
-    "dial",
-    "phone_raw",
-    "phone_e164",
-    "phone_digits",
-  ]) {
-    if (!columnExists("leads", col)) {
-      db.exec(
-        `ALTER TABLE leads ADD COLUMN ${col} ${
-          col === "age" ? "INTEGER" : "TEXT"
-        }`
-      );
-      console.log(`[DB] Added column leads.${col}`);
-    }
-  }
-}
 
-/* ===========================
-   issued_codes (job codes)
-=========================== */
-if (!tableExists("issued_codes")) {
-  db.exec(`
-    CREATE TABLE issued_codes (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      lead_id       INTEGER NOT NULL,
-      tg_id         INTEGER NOT NULL,
-      tg_username   TEXT,
-      code          TEXT UNIQUE NOT NULL,
-      group_posted  INTEGER DEFAULT 0,
-      issued_at     TEXT DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_codes_tg    ON issued_codes(tg_id);
-    CREATE INDEX IF NOT EXISTS idx_codes_lead  ON issued_codes(lead_id);
-  `);
-  console.log("[DB] Created table issued_codes");
-}
-
-/* ===========================
-   executives + assignments
-=========================== */
-if (!tableExists("executives")) {
-  db.exec(`
-    CREATE TABLE executives (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_digits    TEXT UNIQUE NOT NULL,
-      username        TEXT,
-      name            TEXT,
-      active          INTEGER DEFAULT 1,
-      assigned_count  INTEGER DEFAULT 0,
-      last_assigned_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_exec_active ON executives(active);
-  `);
-  console.log("[DB] Created table executives");
-}
-if (!tableExists("code_assignments")) {
-  db.exec(`
-    CREATE TABLE code_assignments (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      issued_id     INTEGER NOT NULL,
-      executive_id  INTEGER NOT NULL,
-      assigned_at   TEXT DEFAULT (datetime('now')),
-      UNIQUE(issued_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ca_executive ON code_assignments(executive_id);
-  `);
-  console.log("[DB] Created table code_assignments");
-}
-
-/* ---------- types ---------- */
-export type SaveLeadInput = {
-  name?: string | null;
-  email?: string | null;
-  gender?: string | null;
-  age?: number | null;
-  countryIso?: string | null;
-  dial?: string | null; // digits without '+'
-  phoneRaw?: string | null;
-  phoneE164?: string | null;
-  phoneDigits?: string | null;
-  ip?: string | null;
-};
 export type LeadRow = {
   id: number;
   name: string | null;
   email: string | null;
-  gender: string | null;
-  age: number | null;
-  country_iso: string | null;
-  dial: string | null;
   phone_raw: string | null;
   phone_e164: string | null;
-  phone_digits: string | null;
+  age: number | null;
+  note: string | null;
+  dial: string | null;
+  country_iso: string | null;
   ip: string | null;
-  created_at: string;
+  created_at: string; // ISO datetime (sqlite TEXT)
 };
+
 export type ExecutiveRow = {
   id: number;
-  phone_digits: string;
-  username: string | null;
+  tg_id: number;
   name: string | null;
-  active: number; // 0/1
+  username: string | null;
   assigned_count: number;
+  created_at: string;        // sqlite TEXT
   last_assigned_at: string | null;
 };
 
-/* ---------- leads API helpers ---------- */
-export function saveLead(input: SaveLeadInput): LeadRow & { last10: string | null } {
-  const dial = digitsOnly(input.dial);
-  const phoneDigits = digitsOnly(input.phoneDigits);
-  const last10 = phoneDigits ? phoneDigits.slice(-10) : null;
+export type CodeIssuedRow = {
+  id: number;
+  lead_id: number;
+  code: string;
+  created_at: string;
+};
 
-  const stmt = db.prepare(`
-    INSERT INTO leads (name, email, gender, age, country_iso, dial, phone_raw, phone_e164, phone_digits, ip)
-    VALUES (@name, @email, @gender, @age, @country_iso, @dial, @phone_raw, @phone_e164, @phone_digits, @ip)
+export type CodeAssignmentRow = {
+  id: number;
+  issued_id: number;
+  executive_id: number;
+  created_at: string;
+};
+
+/* ===========================
+   Schema
+=========================== */
+
+function ensureSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      email TEXT,
+      phone_raw TEXT,
+      phone_e164 TEXT,
+      age INTEGER,
+      note TEXT,
+      dial TEXT,
+      country_iso TEXT,
+      ip TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS executives (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tg_id INTEGER NOT NULL UNIQUE,
+      name TEXT,
+      username TEXT,
+      assigned_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_assigned_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS code_issued (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      code TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (lead_id) REFERENCES leads(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS code_assignments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issued_id INTEGER NOT NULL,
+      executive_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (issued_id) REFERENCES code_issued(id),
+      FOREIGN KEY (executive_id) REFERENCES executives(id)
+    );
   `);
-  const info = stmt.run({
-    name: input.name ?? null,
-    email: input.email ?? null,
-    gender: input.gender ?? null,
-    age: input.age ?? null,
-    country_iso: input.countryIso ?? null,
-    dial: dial || null,
-    phone_raw: input.phoneRaw ?? null,
-    phone_e164: input.phoneE164 ?? null,
-    phone_digits: phoneDigits || null,
-    ip: input.ip ?? null,
-  });
 
-  const row = db
-    .prepare<LeadRow>("SELECT * FROM leads WHERE id = ?")
-    .get(info.lastInsertRowid as number) as LeadRow;
+  // Indexes that help common lookups
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_exec_assigned ON executives(assigned_count, last_assigned_at);
+    CREATE INDEX IF NOT EXISTS idx_code_issued_lead ON code_issued(lead_id);
+    CREATE INDEX IF NOT EXISTS idx_code_assignments_issued ON code_assignments(issued_id);
+  `);
+}
+ensureSchema();
 
-  return { ...row, last10 };
+/* ===========================
+   Helper utilities
+=========================== */
+
+const digitsOnly = (s: string | null | undefined) => (s ?? "").replace(/\D+/g, "");
+
+/** Insert a lead and return the inserted row plus last N leads for UI */
+export function insertLeadAndFetch(
+  lead: Partial<Omit<LeadRow, "id" | "created_at">>,
+  lastCount = 10
+): { inserted: LeadRow; lastN: LeadRow[] } {
+  const stmt = db.prepare<
+    [string | null, string | null, string | null, string | null, number | null, string | null, string | null, string | null, string | null]
+  >(`
+    INSERT INTO leads (name, email, phone_raw, phone_e164, age, note, dial, country_iso, ip)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const name = (lead.name ?? null) as string | null;
+  const email = (lead.email ?? null) as string | null;
+  const phone_raw = (lead.phone_raw ?? null) as string | null;
+  const phone_e164 = (lead.phone_e164 ?? null) as string | null;
+  const age = (lead.age ?? null) as number | null;
+  const note = (lead.note ?? null) as string | null;
+  const dial = (lead.dial ?? null) as string | null;
+  const country_iso = (lead.country_iso ?? null) as string | null;
+  const ip = (lead.ip ?? null) as string | null;
+
+  const info = stmt.run(name, email, phone_raw, phone_e164, age, note, dial, country_iso, ip);
+
+  // safest & simplest: get via last_insert_rowid() for this connection
+  const insertedId = db
+    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
+    .get().id;
+
+  const inserted = db
+    .prepare<[number], LeadRow>("SELECT * FROM leads WHERE id = ?")
+    .get(insertedId);
+
+  const lastN = db
+    .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT 10")
+    .all();
+
+  return { inserted, lastN: lastN.slice(0, lastCount) };
 }
 
-export function getLeadByPhone(e164: string) {
+/** Get the most recent N leads */
+export function getLastLeads(n = 10): LeadRow[] {
   return db
-    .prepare("SELECT * FROM leads WHERE phone_e164 = ? ORDER BY id DESC LIMIT 1")
-    .get(e164) as LeadRow | undefined;
+    .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT ?")
+    // better-sqlite3 requires a bound param to be typed; cast is fine here
+    .all(n as unknown as never);
 }
 
-export function getLeadByDigitsLoose(d: string) {
-  const want = digitsOnly(d);
-  if (!want) return undefined;
+/** Ensure an executive row exists for a given Telegram user id */
+export function upsertExecutive(tgId: number, name?: string, username?: string): ExecutiveRow {
+  const existing = db
+    .prepare<[number], ExecutiveRow>("SELECT * FROM executives WHERE tg_id = ?")
+    .get(tgId);
 
-  const direct = db
-    .prepare("SELECT * FROM leads WHERE phone_digits = ? ORDER BY id DESC LIMIT 1")
-    .get(want) as LeadRow | undefined;
-  if (direct) return direct;
-
-  const last10 = db
-  .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT 10")
-  .all();
-
-  return db
-    .prepare(
-      "SELECT * FROM leads WHERE substr(phone_digits, -10) = ? ORDER BY id DESC LIMIT 1"
-    )
-    .get(last10) as LeadRow | undefined;
-}
-
-/* ---------- codes ---------- */
-function genCode(len = 10) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < len; i++) out += alphabet[(Math.random() * alphabet.length) | 0];
-  return out;
-}
-
-export function getIssuedByTelegramId(tgId: number) {
-  return db
-    .prepare("SELECT * FROM issued_codes WHERE tg_id = ? ORDER BY id DESC LIMIT 1")
-    .get(tgId) as any;
-}
-
-export function getOrCreateCodeFor(leadId: number, tgId: number, tgUsername?: string | null) {
-  const existing = getIssuedByTelegramId(tgId);
-  if (existing) return existing;
-  const code = genCode(10);
-  db.prepare(
-    "INSERT INTO issued_codes (lead_id, tg_id, tg_username, code) VALUES (?, ?, ?, ?)"
-  ).run(leadId, tgId, tgUsername ?? null, code);
-  return db.prepare("SELECT * FROM issued_codes WHERE code = ?").get(code) as any;
-}
-
-export function markGroupPosted(tgId: number) {
-  db.prepare("UPDATE issued_codes SET group_posted = 1 WHERE tg_id = ?").run(tgId);
-}
-
-/* ---------- executives ---------- */
-export function addExecutive(phone: string, username?: string | null, name?: string | null) {
-  const pd = digitsOnly(phone);
-  if (!pd) throw new Error("Invalid phone");
-
-  try {
-    db.prepare(
-      "INSERT INTO executives (phone_digits, username, name, active) VALUES (?, ?, ?, 1)"
-    ).run(pd, username ?? null, name ?? null);
-  } catch (e: any) {
-    // already exists → reactivate & update info
-    if (String(e?.code) === "SQLITE_CONSTRAINT_UNIQUE") {
-      db.prepare(
-        "UPDATE executives SET active=1, username=COALESCE(?, username), name=COALESCE(?, name) WHERE phone_digits=?"
-      ).run(username ?? null, name ?? null, pd);
-    } else {
-      throw e;
-    }
-  }
-  return db.prepare("SELECT * FROM executives WHERE phone_digits=?").get(pd) as ExecutiveRow;
-}
-
-export function removeExecutiveByPhone(phone: string) {
-  const pd = digitsOnly(phone);
-  db.prepare("UPDATE executives SET active=0 WHERE phone_digits=?").run(pd);
-}
-
-export function listExecutives(includeInactive = false) {
-  const sql = includeInactive
-    ? "SELECT * FROM executives ORDER BY active DESC, assigned_count ASC, COALESCE(last_assigned_at,'1970-01-01') ASC"
-    : "SELECT * FROM executives WHERE active=1 ORDER BY assigned_count ASC, COALESCE(last_assigned_at,'1970-01-01') ASC";
-  return db.prepare(sql).all() as ExecutiveRow[];
-}
-
-export function getExecutiveForIssued(issuedId: number) {
-  return db
-    .prepare(
-      `SELECT e.* FROM code_assignments ca
-       JOIN executives e ON e.id = ca.executive_id
-       WHERE ca.issued_id = ?`
-    )
-    .get(issuedId) as ExecutiveRow | undefined;
-}
-
-export function assignExecutiveToIssued(issuedId: number) {
-  // already assigned?
-  const existing = getExecutiveForIssued(issuedId);
   if (existing) return existing;
 
-  // pick next active exec (least assigned, oldest assignment first)
-  const exec = db
-    .prepare(
-      `SELECT * FROM executives
-       WHERE active=1
-       ORDER BY assigned_count ASC,
-                COALESCE(last_assigned_at,'1970-01-01') ASC
-       LIMIT 1`
-    )
-    .get() as ExecutiveRow | undefined;
+  db.prepare<[number, string | null, string | null]>(
+    "INSERT INTO executives (tg_id, name, username) VALUES (?, ?, ?)"
+  ).run(tgId, name ?? null, username ?? null);
 
-  if (!exec) return undefined;
+  const inserted = db
+    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
+    .get().id;
 
+  return db
+    .prepare<[number], ExecutiveRow>("SELECT * FROM executives WHERE id = ?")
+    .get(inserted);
+}
+
+/** Round-robin: pick the next executive with the fewest assignments (and oldest last_assigned_at) */
+export function pickNextExecutive(): ExecutiveRow | undefined {
+  return db
+    .prepare<[], ExecutiveRow>(`
+      SELECT * FROM executives
+      ORDER BY assigned_count ASC, IFNULL(last_assigned_at, '1970-01-01T00:00:00') ASC, id ASC
+      LIMIT 1
+    `)
+    .get();
+}
+
+/** Create an issued code entry (e.g., after generating a code for a lead) */
+export function createIssuedCode(leadId: number, code: string): CodeIssuedRow {
+  db.prepare<[number, string]>("INSERT INTO code_issued (lead_id, code) VALUES (?, ?)")
+    .run(leadId, code);
+
+  const id = db
+    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
+    .get().id;
+
+  return db
+    .prepare<[number], CodeIssuedRow>("SELECT * FROM code_issued WHERE id = ?")
+    .get(id);
+}
+
+/** Assign an issued code to an executive (transaction) and bump counters */
+export function assignExecutiveToIssued(issuedId: number, exec: ExecutiveRow): CodeAssignmentRow {
   const tx = db.transaction((eid: number, ex: ExecutiveRow) => {
-    db.prepare(
+    db.prepare<[number, number]>(
       "INSERT INTO code_assignments (issued_id, executive_id) VALUES (?, ?)"
     ).run(eid, ex.id);
-    db.prepare(
-      "UPDATE executives SET assigned_count = assigned_count + 1, last_assigned_at = datetime('now') WHERE id=?"
+
+    db.prepare<[number]>(
+      "UPDATE executives SET assigned_count = assigned_count + 1, last_assigned_at = datetime('now') WHERE id = ?"
     ).run(ex.id);
   });
 
   tx(issuedId, exec);
-  return getExecutiveForIssued(issuedId)!;
+
+  return db
+    .prepare<[number], CodeAssignmentRow>(
+      "SELECT * FROM code_assignments WHERE issued_id = ? ORDER BY id DESC LIMIT 1"
+    )
+    .get(issuedId);
 }
 
+/** Look up assigned executive for an issued record */
+export function getExecutiveForIssued(issuedId: number): ExecutiveRow | undefined {
+  return db
+    .prepare<[number], ExecutiveRow>(`
+      SELECT e.* FROM executives e
+      JOIN code_assignments ca ON ca.executive_id = e.id
+      WHERE ca.issued_id = ?
+      ORDER BY ca.id DESC
+      LIMIT 1
+    `)
+    .get(issuedId);
+}
+
+/** Normalize/compute phone values – handy if you need it somewhere else */
+export function toDigits(phone: string | null | undefined) {
+  return digitsOnly(phone);
+}
