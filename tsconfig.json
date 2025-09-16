@@ -17,6 +17,13 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./*"] }
   },
-  "include": ["next-env.d.ts", "app/**/*", "lib/**/*", "components/**/*", "pages/**/*"],
+  "include": [
+    "next-env.d.ts",
+    "app/**/*",
+    "lib/**/*",
+    "components/**/*",
+    "pages/**/*",
+    "types/**/*.d.ts"
+  ],
   "exclude": ["node_modules", ".next", "bot", "scripts"]
 }
