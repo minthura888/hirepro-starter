@@ -6,16 +6,13 @@ import Database from "better-sqlite3";
 /**
  * DB path:
  * - On Vercel, default to /tmp/app.db (writable but ephemeral)
- * - Else use ./data/app.db (make sure the folder is writable on VPS/local)
+ * - Else use ./data/app.db
  */
 const DB_PATH =
   process.env.DATABASE_PATH ||
   (process.env.VERCEL ? "/tmp/app.db" : path.join(process.cwd(), "data", "app.db"));
 
-/** ensure parent dir exists */
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-
-/** single process-wide connection (better-sqlite3 is sync) */
 export const db = new Database(DB_PATH);
 
 /* ===========================
@@ -33,7 +30,7 @@ export type LeadRow = {
   dial: string | null;
   country_iso: string | null;
   ip: string | null;
-  created_at: string; // ISO datetime (sqlite TEXT)
+  created_at: string; // sqlite TEXT
 };
 
 export type ExecutiveRow = {
@@ -106,10 +103,7 @@ function ensureSchema() {
       FOREIGN KEY (issued_id) REFERENCES code_issued(id),
       FOREIGN KEY (executive_id) REFERENCES executives(id)
     );
-  `);
 
-  // Indexes that help common lookups
-  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_exec_assigned ON executives(assigned_count, last_assigned_at);
     CREATE INDEX IF NOT EXISTS idx_code_issued_lead ON code_issued(lead_id);
@@ -119,18 +113,21 @@ function ensureSchema() {
 ensureSchema();
 
 /* ===========================
-   Helper utilities
+   Helpers
 =========================== */
 
 const digitsOnly = (s: string | null | undefined) => (s ?? "").replace(/\D+/g, "");
 
-/** Insert a lead and return the inserted row plus last N leads for UI */
+/** Insert a lead and return the inserted row + last N leads */
 export function insertLeadAndFetch(
   lead: Partial<Omit<LeadRow, "id" | "created_at">>,
   lastCount = 10
 ): { inserted: LeadRow; lastN: LeadRow[] } {
   const stmt = db.prepare<
-    [string | null, string | null, string | null, string | null, number | null, string | null, string | null, string | null, string | null]
+    [
+      string | null, string | null, string | null, string | null,
+      number | null, string | null, string | null, string | null, string | null
+    ]
   >(`
     INSERT INTO leads (name, email, phone_raw, phone_e164, age, note, dial, country_iso, ip)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -147,32 +144,27 @@ export function insertLeadAndFetch(
   const ip = (lead.ip ?? null) as string | null;
 
   const info = stmt.run(name, email, phone_raw, phone_e164, age, note, dial, country_iso, ip);
-
-  // safest & simplest: get via last_insert_rowid() for this connection
-  const insertedId = db
-    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
-    .get().id;
+  const insertedId = Number(info.lastInsertRowid);
 
   const inserted = db
     .prepare<[number], LeadRow>("SELECT * FROM leads WHERE id = ?")
-    .get(insertedId);
+    .get(insertedId)!;
 
   const lastN = db
-    .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT 10")
-    .all();
+    .prepare<[number], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT ?")
+    .all(lastCount);
 
-  return { inserted, lastN: lastN.slice(0, lastCount) };
+  return { inserted, lastN };
 }
 
 /** Get the most recent N leads */
 export function getLastLeads(n = 10): LeadRow[] {
   return db
-    .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT ?")
-    // better-sqlite3 requires a bound param to be typed; cast is fine here
-    .all(n as unknown as never);
+    .prepare<[number], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT ?")
+    .all(n);
 }
 
-/** Ensure an executive row exists for a given Telegram user id */
+/** Ensure an executive exists for a given Telegram user id */
 export function upsertExecutive(tgId: number, name?: string, username?: string): ExecutiveRow {
   const existing = db
     .prepare<[number], ExecutiveRow>("SELECT * FROM executives WHERE tg_id = ?")
@@ -180,20 +172,19 @@ export function upsertExecutive(tgId: number, name?: string, username?: string):
 
   if (existing) return existing;
 
-  db.prepare<[number, string | null, string | null]>(
-    "INSERT INTO executives (tg_id, name, username) VALUES (?, ?, ?)"
-  ).run(tgId, name ?? null, username ?? null);
+  const info = db
+    .prepare<[number, string | null, string | null]>(
+      "INSERT INTO executives (tg_id, name, username) VALUES (?, ?, ?)"
+    )
+    .run(tgId, name ?? null, username ?? null);
 
-  const inserted = db
-    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
-    .get().id;
-
+  const id = Number(info.lastInsertRowid);
   return db
     .prepare<[number], ExecutiveRow>("SELECT * FROM executives WHERE id = ?")
-    .get(inserted);
+    .get(id)!;
 }
 
-/** Round-robin: pick the next executive with the fewest assignments (and oldest last_assigned_at) */
+/** Pick the next executive: fewest assignments, oldest last_assigned_at */
 export function pickNextExecutive(): ExecutiveRow | undefined {
   return db
     .prepare<[], ExecutiveRow>(`
@@ -204,18 +195,16 @@ export function pickNextExecutive(): ExecutiveRow | undefined {
     .get();
 }
 
-/** Create an issued code entry (e.g., after generating a code for a lead) */
+/** Create an issued code row */
 export function createIssuedCode(leadId: number, code: string): CodeIssuedRow {
-  db.prepare<[number, string]>("INSERT INTO code_issued (lead_id, code) VALUES (?, ?)")
+  const info = db
+    .prepare<[number, string]>("INSERT INTO code_issued (lead_id, code) VALUES (?, ?)")
     .run(leadId, code);
 
-  const id = db
-    .prepare<[], { id: number }>("SELECT last_insert_rowid() AS id")
-    .get().id;
-
+  const id = Number(info.lastInsertRowid);
   return db
     .prepare<[number], CodeIssuedRow>("SELECT * FROM code_issued WHERE id = ?")
-    .get(id);
+    .get(id)!;
 }
 
 /** Assign an issued code to an executive (transaction) and bump counters */
@@ -236,7 +225,7 @@ export function assignExecutiveToIssued(issuedId: number, exec: ExecutiveRow): C
     .prepare<[number], CodeAssignmentRow>(
       "SELECT * FROM code_assignments WHERE issued_id = ? ORDER BY id DESC LIMIT 1"
     )
-    .get(issuedId);
+    .get(issuedId)!;
 }
 
 /** Look up assigned executive for an issued record */
@@ -252,7 +241,7 @@ export function getExecutiveForIssued(issuedId: number): ExecutiveRow | undefine
     .get(issuedId);
 }
 
-/** Normalize/compute phone values – handy if you need it somewhere else */
+/** Utility if needed elsewhere */
 export function toDigits(phone: string | null | undefined) {
   return digitsOnly(phone);
 }
