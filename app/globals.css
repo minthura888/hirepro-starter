@@ -1,0 +1,24 @@
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Blue theme tokens */
+:root{
+  --brand: #2563eb;           /* primary blue 600 */
+  --brand-muted: #e0ecff;     /* very light blue */
+  --dark: #0f172a;            /* slate-900 */
+  --light: #f8fafc;           /* slate-50 */
+  --text: #0f172a;            /* slate-900 */
+}
+
+/* Helpers */
+.btn-primary{
+  @apply inline-flex items-center justify-center rounded-xl px-5 py-3 font-medium text-white bg-[var(--brand)] hover:opacity-95 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)];
+}
+.btn-secondary{
+  @apply inline-flex items-center justify-center rounded-xl px-5 py-3 font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)];
+}
+.card-like{
+  @apply rounded-2xl border border-slate-200 bg-white;
+}
