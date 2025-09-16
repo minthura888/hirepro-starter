@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env
+.env.*
+npm-debug.log*
+yarn-error.log
+pnpm-lock.yaml
+data/*.db
+data/*.sqlite
