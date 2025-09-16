@@ -1,0 +1,38 @@
+{
+  "name": "hirepro-starter",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "dev:web": "next dev",
+    "dev:bot": "ts-node -T -P tsconfig.bot.json bot/index.ts",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "dayjs": "^1.11.18",
+    "dotenv": "^17.2.2",
+    "libphonenumber-js": "^1.12.17",
+    "lucide-react": "^0.452.0",
+    "next": "14.2.4",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "telegraf": "^4.16.3",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/react": "18.2.66",
+    "@types/react-dom": "18.2.22",
+    "autoprefixer": "10.4.19",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.4",
+    "postcss": "8.4.38",
+    "tailwindcss": "3.4.7",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "5.4.5"
+  }
+}
