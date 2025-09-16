@@ -15,9 +15,8 @@ const digitsOnly = (s: string | null | undefined) =>
 
 function tableExists(name: string) {
   const row = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
-    .get(name) as any;
-  return !!row;
+  .prepare<[number], LeadRow>("SELECT * FROM leads WHERE id = ?")
+  .get(Number(info.lastInsertRowid));
 }
 function columnExists(table: string, column: string) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
@@ -202,8 +201,9 @@ export function getLeadByDigitsLoose(d: string) {
     .get(want) as LeadRow | undefined;
   if (direct) return direct;
 
-  const last10 = want.slice(-10);
-  if (!last10) return undefined;
+  const last10 = db
+  .prepare<[], LeadRow>("SELECT * FROM leads ORDER BY id DESC LIMIT 10")
+  .all();
 
   return db
     .prepare(
@@ -314,3 +314,4 @@ export function assignExecutiveToIssued(issuedId: number) {
   tx(issuedId, exec);
   return getExecutiveForIssued(issuedId)!;
 }
+
