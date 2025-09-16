@@ -34,5 +34,6 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "5.4.5"
+    "@types/better-sqlite3": "^7.6.9"
   }
 }
