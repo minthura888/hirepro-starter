@@ -31,17 +31,21 @@ function ensureSchema() {
       dial TEXT,
       country_iso TEXT,
       ip TEXT,
-      work_code TEXT,               -- stored here, not returned to client
+      work_code TEXT,               -- keep code here, not returned to client
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
-  // Unique on phone (one active record per phone)
+
+  // One row per phone, and codes are unique across all rows
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_phone ON leads(phone_e164);`);
-  // Add work_code if an old DB exists without it
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_workcode ON leads(work_code);`);
+
+  // Backfill column if very old DB existed without work_code
   try {
     const cols = db.prepare(`PRAGMA table_info(leads)`).all() as any[];
     if (!cols.some(c => c.name === 'work_code')) {
       db.exec(`ALTER TABLE leads ADD COLUMN work_code TEXT;`);
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_workcode ON leads(work_code);`);
     }
   } catch {}
 }
@@ -63,16 +67,26 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() as any });
 }
 
-// ---------- helpers ----------
-function genCodeRaw() {
-  // 8-char alphanumeric, uppercase
-  return crypto.randomBytes(5).toString('base64url').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase();
+// -------- helpers to build an 8-char code like A26Z7EA2 --------
+function gen8() {
+  // produce 8 upper-case [A-Z0-9]
+  while (true) {
+    const c = crypto.randomBytes(6).toString('base64url').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (c.length >= 8) return c.slice(0, 8);
+  }
 }
-function genWorkCode() {
-  return `HP-${genCodeRaw()}`;
+function createUniqueWorkCode(): string {
+  // loop to avoid ultra-rare collision
+  for (let i = 0; i < 10; i++) {
+    const code = gen8();
+    const exists = db.prepare(`SELECT 1 FROM leads WHERE work_code = ?`).get(code);
+    if (!exists) return code;
+  }
+  // practically unreachable; still 8 chars
+  return crypto.randomBytes(8).toString('hex').slice(0, 8).toUpperCase();
 }
 
-// ---------- GET /api/lead?limit=10&key=... (for admin only) ----------
+// ---------- GET /api/lead?limit=10&key=... (admin only; no code returned) ----------
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -98,13 +112,13 @@ export async function GET(req: Request) {
   }
 }
 
-// ---------- POST /api/lead (create or update; server generates work_code) ----------
+// ---------- POST /api/lead ----------
 const BodySchema = z.object({
   name: z.string().trim().min(1),
   email: z.string().email().trim(),
   countryIso: z.string().trim(),
   dial: z.string().trim(),
-  phone: z.string().trim(), // digits only (local part)
+  phone: z.string().trim(), // digits only local part
   gender: z.enum(['male', 'female']).optional(),
   age: z.coerce.number().int().min(16).max(99).optional(),
   note: z.string().trim().max(500).optional().nullable(),
@@ -113,7 +127,6 @@ const BodySchema = z.object({
 export async function POST(req: Request) {
   try {
     const data = BodySchema.parse(await req.json());
-
     const ip =
       (req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for') || '')
         .split(',')[0]
@@ -122,11 +135,15 @@ export async function POST(req: Request) {
     const phoneRaw = data.phone.replace(/\D+/g, '');
     const e164 = `${data.dial}${phoneRaw}`;
 
-    // Try to find existing lead for this phone (keep the same code)
+    // If phone exists -> update only; keep code (or create one if missing)
     const existing = db.prepare<[string], any>('SELECT id, work_code FROM leads WHERE phone_e164 = ?').get(e164);
-
     if (existing) {
-      // Update details but DO NOT change work_code
+      let code = existing.work_code as string | null;
+      if (!code) {
+        code = createUniqueWorkCode();
+        db.prepare('UPDATE leads SET work_code = ? WHERE id = ?').run(code, existing.id);
+      }
+
       db.prepare(`
         UPDATE leads
            SET name = ?, email = ?, phone_raw = ?, age = ?, gender = ?, note = ?,
@@ -145,12 +162,12 @@ export async function POST(req: Request) {
         existing.id
       );
 
-      // Return only id (NOT the code)
+      // Return only id; NOT the work_code
       return NextResponse.json({ ok: true, inserted: { id: existing.id } }, { headers: corsHeaders() as any });
     }
 
-    // New lead → create a new code
-    const workCode = genWorkCode();
+    // New phone -> generate unique 8-char code once
+    const workCode = createUniqueWorkCode();
 
     const info = db
       .prepare<
@@ -179,7 +196,7 @@ export async function POST(req: Request) {
       );
 
     return NextResponse.json(
-      { ok: true, inserted: { id: Number(info.lastInsertRowid) } }, // no code returned
+      { ok: true, inserted: { id: Number(info.lastInsertRowid) } }, // code is not exposed
       { headers: corsHeaders() as any }
     );
   } catch (err: any) {
