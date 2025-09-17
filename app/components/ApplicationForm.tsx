@@ -1,17 +1,12 @@
 'use client';
 
-import React from 'react';
-import { useState } from 'react';
+import React, { useState } from 'react';
 
-// If you later host API on a VPS/domain, set NEXT_PUBLIC_API_BASE in Vercel.
-// For now (Vercel API), this will be '' and fetch('/api/lead') will work.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
-const BOT_USERNAME =
-  process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
+const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
 
-// Minimal country list (add more as needed)
 const COUNTRIES = [
-  { iso: 'in', name: 'India', dial: '+91' },
+  { iso: 'in', name: 'India', dial: '+91' },       // default first
   { iso: 'us', name: 'USA/Canada', dial: '+1' },
   { iso: 'mm', name: 'Myanmar', dial: '+95' },
   { iso: 'sg', name: 'Singapore', dial: '+65' },
@@ -20,7 +15,7 @@ const COUNTRIES = [
 
 export default function ApplicationForm() {
   const [name, setName] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // +91 default
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [age, setAge] = useState<string>('');
@@ -29,34 +24,18 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  function digitsOnly(v: string) {
-    return v.replace(/\D+/g, '');
-  }
+  function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setOkMsg(null);
+    setError(null); setOkMsg(null);
 
-    // Basic validation
-    if (!name.trim()) {
-      setError('Please enter your name.');
-      return;
-    }
+    if (!name.trim()) return setError('Please enter your name.');
     const local = digitsOnly(phone);
-    if (!local) {
-      setError('Please enter your Telegram phone number (digits only).');
-      return;
-    }
-    if (!email.trim()) {
-      setError('Please enter a valid email.');
-      return;
-    }
+    if (!local) return setError('Please enter your Telegram phone number (digits only).');
+    if (!email.trim()) return setError('Please enter a valid email.');
     const ageNum = Number(age || '0');
-    if (!ageNum || ageNum < 16 || ageNum > 99) {
-      setError('Please enter a valid age (16–99).');
-      return;
-    }
+    if (!ageNum || ageNum < 16 || ageNum > 99) return setError('Please enter a valid age (16–99).');
 
     const payload = {
       name: name.trim(),
@@ -76,24 +55,15 @@ export default function ApplicationForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       const data = await res.json().catch(() => ({} as any));
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || `Save failed (${res.status})`);
-      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `Save failed (${res.status})`);
 
       setOkMsg('Saved! Opening Telegram…');
 
-      // Open Telegram bot in a new tab/window
-      const url = `https://t.me/${BOT_USERNAME}`;
-      window.open(url, '_blank');
+      // Open bot WITHOUT passing any code
+      window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
 
-      // Reset form
-      setName('');
-      setPhone('');
-      setAge('');
-      setEmail('');
+      setName(''); setPhone(''); setAge(''); setEmail('');
     } catch (err: any) {
       setError(err?.message || 'Save failed.');
     } finally {
@@ -110,13 +80,9 @@ export default function ApplicationForm() {
 
         {/* Name */}
         <div className="mt-4">
-          <label className="block text-sm font-medium text-slate-700">
-            * Name
-          </label>
+          <label className="block text-sm font-medium text-slate-700">* Name</label>
           <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            type="text" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Please enter your name"
             className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
@@ -124,19 +90,14 @@ export default function ApplicationForm() {
 
         {/* Phone (3:7 grid) */}
         <div className="mt-6">
-          <label className="block text-sm font-medium text-slate-700">
-            * Telegram phone number
-          </label>
-
+          <label className="block text-sm font-medium text-slate-700">* Telegram phone number</label>
           <div className="mt-2 grid grid-cols-10 gap-3">
-            {/* 3/10 = country code */}
             <div className="col-span-3">
               <select
                 value={selectedCountry.iso}
                 onChange={(e) =>
                   setSelectedCountry(
-                    COUNTRIES.find((c) => c.iso === e.target.value) ||
-                      COUNTRIES[0]
+                    COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0]
                   )
                 }
                 className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
@@ -148,47 +109,28 @@ export default function ApplicationForm() {
                 ))}
               </select>
             </div>
-
-            {/* 7/10 = local number */}
             <div className="col-span-7">
               <input
-                type="tel"
-                inputMode="numeric"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                type="tel" inputMode="numeric"
+                value={phone} onChange={(e) => setPhone(e.target.value)}
                 placeholder="Telephone number (digits only)"
                 className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
               />
             </div>
           </div>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Enter digits only. We’ll combine it with the country code.
-          </p>
+          <p className="mt-1 text-xs text-slate-500">Enter digits only. We’ll combine it with the country code.</p>
         </div>
 
         {/* Gender */}
         <div className="mt-6">
-          <label className="block text-sm font-medium text-slate-700">
-            * Gender
-          </label>
+          <label className="block text-sm font-medium text-slate-700">* Gender</label>
           <div className="mt-2 flex items-center gap-6">
             <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="gender"
-                checked={gender === 'male'}
-                onChange={() => setGender('male')}
-              />
+              <input type="radio" name="gender" checked={gender === 'male'} onChange={() => setGender('male')} />
               <span>Male</span>
             </label>
             <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="gender"
-                checked={gender === 'female'}
-                onChange={() => setGender('female')}
-              />
+              <input type="radio" name="gender" checked={gender === 'female'} onChange={() => setGender('female')} />
               <span>Female</span>
             </label>
           </div>
@@ -196,15 +138,10 @@ export default function ApplicationForm() {
 
         {/* Age */}
         <div className="mt-6">
-          <label className="block text-sm font-medium text-slate-700">
-            * Age
-          </label>
+          <label className="block text-sm font-medium text-slate-700">* Age</label>
           <input
-            type="number"
-            min={16}
-            max={99}
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
+            type="number" min={16} max={99}
+            value={age} onChange={(e) => setAge(e.target.value)}
             placeholder="Please enter your age"
             className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
@@ -212,13 +149,9 @@ export default function ApplicationForm() {
 
         {/* Email */}
         <div className="mt-6">
-          <label className="block text-sm font-medium text-slate-700">
-            * Email
-          </label>
+          <label className="block text-sm font-medium text-slate-700">* Email</label>
           <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             placeholder="Please enter your email address"
             className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
@@ -226,26 +159,13 @@ export default function ApplicationForm() {
 
         {/* Submit */}
         <div className="mt-8">
-          <button
-            type="submit"
-            disabled={saving}
-            className="btn-primary w-full md:w-auto"
-          >
+          <button type="submit" disabled={saving} className="btn-primary w-full md:w-auto">
             {saving ? 'Saving…' : 'Send to Telegram'}
           </button>
         </div>
 
-        {/* Messages */}
-        {error && (
-          <p className="mt-4 text-sm text-red-600">
-            {error}
-          </p>
-        )}
-        {okMsg && (
-          <p className="mt-4 text-sm text-green-600">
-            {okMsg}
-          </p>
-        )}
+        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+        {okMsg && <p className="mt-4 text-sm text-green-600">{okMsg}</p>}
       </div>
     </form>
   );
