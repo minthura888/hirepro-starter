@@ -1,358 +1,271 @@
 // bot/index.ts
-// Run with:  npm run dev:bot
 import 'dotenv/config';
-import { Telegraf, Markup } from 'telegraf';
+import { Telegraf, Markup, Context } from 'telegraf';
 import Database from 'better-sqlite3';
 import path from 'node:path';
 
-/* ========= ENV ========= */
-const BOT_TOKEN =
-  process.env.TELEGRAM_BOT_TOKEN || process.env.TOKEN || process.env.BOT_TOKEN;
-if (!BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN in env');
+/** ---------- ENV ---------- */
+const BOT_TOKEN = process.env.BOT_TOKEN!;
+const GROUP_ID = Number(process.env.GROUP_ID);
+const OWNER_ID = Number(process.env.OWNER_ID);
+const DB_PATH =
+  process.env.DATABASE_PATH ||
+  path.join(process.cwd(), 'data', 'app.db');
 
-const OWNER_ID = Number(process.env.TELEGRAM_OWNER_ID || 0); // who can use /add /remove /status in groups
-const GROUP_ID = Number(process.env.TELEGRAM_GROUP_ID || 0);
+if (!BOT_TOKEN) throw new Error('BOT_TOKEN missing');
+if (!GROUP_ID) throw new Error('GROUP_ID missing');
+if (!OWNER_ID) throw new Error('OWNER_ID missing');
 
-const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'app.db');
+/** ---------- DB ---------- */
 const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
 
-/* ========= DB INIT (with auto-migrations) ========= */
+// Leads table is created by the web app. Make sure the extra fields exist:
 db.exec(`
-CREATE TABLE IF NOT EXISTS leads (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT, email TEXT, gender TEXT, age INTEGER,
-  phone_e164 TEXT, phone_raw TEXT, dial TEXT, country_iso TEXT
-);
+  CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    email TEXT,
+    phone_raw TEXT,
+    phone_e164 TEXT UNIQUE,
+    age INTEGER,
+    gender TEXT,
+    note TEXT,
+    dial TEXT,
+    country_iso TEXT,
+    ip TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+const ensureCol = (col: string, def: string) => {
+  try { db.prepare(`SELECT ${col} FROM leads LIMIT 1`).get(); }
+  catch {
+    db.exec(`ALTER TABLE leads ADD COLUMN ${col} ${def}`);
+  }
+};
+ensureCol('work_code', 'TEXT');
+ensureCol('group_posted', "INTEGER NOT NULL DEFAULT 0");
+ensureCol('posted_at', 'TEXT');
 
-CREATE TABLE IF NOT EXISTS executives (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  phone_digits TEXT NOT NULL DEFAULT '',
-  username TEXT,
-  display_name TEXT DEFAULT '',
-  is_active INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS code_assignments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  lead_id INTEGER,
-  tg_id INTEGER,
-  code TEXT
-);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS exec_assignments (
+    phone_e164 TEXT PRIMARY KEY,
+    exec_username TEXT NOT NULL,
+    added_by INTEGER,
+    added_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
-function ensureColumn(table: string, defSql: string) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((r:any)=>r.name);
-  const name = defSql.split(/\s+/)[0];
-  if (!cols.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${defSql}`);
-}
-ensureColumn('code_assignments', "exec_id INTEGER");
-ensureColumn('code_assignments', "group_posted INTEGER NOT NULL DEFAULT 0");
-ensureColumn('code_assignments', "created_at TEXT NOT NULL DEFAULT (datetime('now'))");
-ensureColumn('executives', "created_at TEXT NOT NULL DEFAULT (datetime('now'))");
-ensureColumn('executives', "last_assigned_at TEXT");   // for round-robin tiebreaker
-ensureColumn('leads', "ip TEXT");
+/** ---------- helpers ---------- */
+const esc = (s: string) =>
+  s.replace(/[<>&"]/g, (m) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[m]!));
 
-/* ========= helpers ========= */
-const digitsOnly = (s: string) => (s || '').replace(/\D+/g, '');
-const at = (u?: string|null) => u ? (u.startsWith('@') ? u : '@' + u) : '(none)';
-const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-function ensurePlus(num: string | null | undefined) {
-  if (!num) return '';
-  const d = digitsOnly(num);
-  return d ? `+${d}` : '';
+function toE164(anyPhone: string): string | null {
+  if (!anyPhone) return null;
+  let digits = anyPhone.replace(/[^\d]/g, '');    // keep numbers
+  if (!digits) return null;
+  // Telegram contact is usually intl without "+"; accept "00.." too
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  return '+' + digits;
 }
 
-function findLeadByPhoneAny(raw: string) {
-  const d = digitsOnly(raw);
-  const last7 = d.slice(-7);
-
-  // exact E.164 match
-  let r = db.prepare(`SELECT * FROM leads WHERE phone_e164 = ? ORDER BY id DESC LIMIT 1`).get('+'+d) as any;
-  if (r) return r;
-
-  // partial match
-  r = db.prepare(`
-    SELECT * FROM leads
-    WHERE REPLACE(REPLACE(IFNULL(phone_raw,''), ' ', ''), '-', '') LIKE '%' || ?
-       OR REPLACE(REPLACE(REPLACE(IFNULL(phone_e164,''), '+',''), ' ', ''), '-', '') LIKE '%' || ?
-    ORDER BY id DESC LIMIT 1
-  `).get(last7, last7) as any;
-  if (r) return r;
-
-  return null;
-}
-
-function getIssuedByTelegramId(tgId: number) {
-  return db.prepare(`
-    SELECT ca.*, e.username AS exec_username, COALESCE(e.display_name,'') AS exec_display
-    FROM code_assignments ca
-    LEFT JOIN executives e ON e.id = ca.exec_id
-    WHERE ca.tg_id = ?
-    ORDER BY ca.id DESC LIMIT 1
-  `).get(tgId) as any;
-}
-
-function makeCode(len = 10) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+function randomWorkCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no easily-confused chars
   let out = '';
-  for (let i=0;i<len;i++) out += chars[Math.floor(Math.random()*chars.length)];
+  for (let i = 0; i < 8; i++) out += alphabet[Math.floor(Math.random()*alphabet.length)];
   return out;
 }
 
-function getOrCreateCodeFor(leadId: number, tgId: number) {
-  const exists = db.prepare(`SELECT * FROM code_assignments WHERE lead_id = ? OR tg_id = ? ORDER BY id DESC LIMIT 1`).get(leadId, tgId) as any;
-  if (exists) return exists;
-  const code = makeCode(10);
-  const info = db.prepare(`INSERT INTO code_assignments (lead_id, tg_id, code) VALUES (?,?,?)`).run(leadId, tgId, code);
-  return db.prepare(`SELECT * FROM code_assignments WHERE id = ?`).get(Number(info.lastInsertRowid)) as any;
+type Lead = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  phone_e164: string;
+  phone_raw: string | null;
+  age: number | null;
+  gender: string | null;
+  note: string | null;
+  ip: string | null;
+  work_code: string | null;
+  group_posted: number;
+  posted_at: string | null;
+};
+
+const getLeadByPhone = db.prepare<unknown[], Lead>(
+  `SELECT * FROM leads WHERE phone_e164 = ?`
+);
+
+const setWorkCodeStmt = db.prepare(`UPDATE leads SET work_code = ? WHERE id = ?`);
+const markPostedStmt = db.prepare(`UPDATE leads SET group_posted = 1, posted_at = datetime('now') WHERE id = ?`);
+
+const getAssignmentStmt = db.prepare<{p: string}, {exec_username: string} | undefined>(
+  `SELECT exec_username FROM exec_assignments WHERE phone_e164 = :p`
+);
+const upsertAssignmentStmt = db.prepare(
+  `INSERT INTO exec_assignments(phone_e164, exec_username, added_by)
+   VALUES (?, ?, ?)
+   ON CONFLICT(phone_e164) DO UPDATE SET exec_username=excluded.exec_username, added_by=excluded.added_by, added_at=datetime('now')`
+);
+const removeAssignmentStmt = db.prepare(`DELETE FROM exec_assignments WHERE phone_e164 = ?`);
+const statusByExecStmt = db.prepare(`SELECT exec_username, COUNT(*) AS c FROM exec_assignments GROUP BY exec_username ORDER BY c DESC`);
+
+function ensureWorkCode(lead: Lead): string {
+  if (lead.work_code && lead.work_code.length >= 6) return lead.work_code;
+  const code = randomWorkCode();
+  setWorkCodeStmt.run(code, lead.id);
+  return code;
 }
 
-function countAssigned(execId: number) {
-  const r = db.prepare(`SELECT COUNT(*) AS c FROM code_assignments WHERE exec_id = ?`).get(execId) as any;
-  return r?.c || 0;
-}
-
-// ---- ROUND-ROBIN PICK ----
-// choose active executive with the fewest assignments; tie → oldest last_assigned_at; then lowest id
-function chooseExecutive(): any | null {
-  const row = db.prepare(`
-    SELECT e.*,
-      COALESCE( (SELECT COUNT(*) FROM code_assignments ca WHERE ca.exec_id = e.id), 0 ) AS assigned_count
-    FROM executives e
-    WHERE e.is_active = 1 AND (e.username IS NOT NULL AND e.username <> '')
-    ORDER BY assigned_count ASC, COALESCE(e.last_assigned_at, '') ASC, e.id ASC
-    LIMIT 1
-  `).get() as any;
-  return row || null;
-}
-
-function assignExecutiveToIssued(issuedId: number) {
-  const exec = chooseExecutive();
-  if (!exec) return null;
-  db.prepare(`UPDATE code_assignments SET exec_id = ? WHERE id = ?`).run(exec.id, issuedId);
-  db.prepare(`UPDATE executives SET last_assigned_at = datetime('now') WHERE id = ?`).run(exec.id);
-  return { id: exec.id, username: exec.username, display: exec.display_name };
-}
-
-function markGroupPosted(tgId: number) {
-  db.prepare(`UPDATE code_assignments SET group_posted = 1 WHERE tg_id = ?`).run(tgId);
-}
-
-/* ========= KEYBOARD ========= */
-function contactKb() {
-  return Markup.keyboard([[Markup.button.contactRequest('📇 Click Accept Job Code.')]]).resize();
-}
-
-/* ========= BOT ========= */
+/** ---------- bot ---------- */
 const bot = new Telegraf(BOT_TOKEN);
 
-/* ----- HELP ----- */
-bot.help(async (ctx) => {
+// Common keyboards
+const shareKeyboard = Markup.keyboard([
+  Markup.button.contactRequest('📲 Click Accept Job Code.')
+]).oneTime().resize();
+
+const linksText =
+  'Use /info to view your account information\n' +
+  'Use /share to share your contact details\n' +
+  'Use /help to get instructions';
+
+bot.start(async (ctx) => {
+  const name = esc(ctx.from?.first_name ?? 'there');
   await ctx.reply(
-`1) Fill the application form on our website
-2) Come back here and tap /share to send your Telegram contact
-3) If your phone matches the form, I'll issue your job code`
+    `Hello ${name}!\n\n${linksText}\n\nPlease click the button below to share your contact information`,
+    shareKeyboard
   );
 });
 
-/* ----- START / SHARE / INFO (DM) ----- */
-bot.start(async (ctx) => {
-  const name = `${ctx.from?.first_name || ''} ${ctx.from?.last_name || ''}`.trim() || 'there';
+bot.help(async (ctx) => {
   await ctx.reply(
-    `Hello ${name}!\n\n` +
-      `Use /info to view your account information\n` +
-      `Use /share to share your contact details\n` +
-      `Use /help to get instructions`
+    'You need to enter the same mobile phone number as your Telegram number and submit the website form before you can get the job.\n\n' +
+    linksText
   );
-  await ctx.reply('Please click the button below to share your contact information', contactKb());
 });
 
 bot.command('share', async (ctx) => {
-  await ctx.reply('Please click the button below to share your contact information', contactKb());
+  await ctx.reply('Tap the button to send your Telegram phone number:', shareKeyboard);
 });
 
 bot.command('info', async (ctx) => {
-  const issued = getIssuedByTelegramId(ctx.from!.id);
-  if (!issued) {
-    await ctx.reply(`No code issued yet. Tap /share and accept to continue.`, contactKb());
-    return;
-  }
-  const label = issued.exec_username ? at(issued.exec_username) : '(pending)';
-  await ctx.replyWithHTML(
-    `Verify successfully!\n` +
-      `Job code: <code>${esc(issued.code)}</code>\n` +
-      `Executive service: ${esc(label)}`,
-    issued.exec_username ? Markup.inlineKeyboard([Markup.button.url(`Message ${label}`, `https://t.me/${issued.exec_username}`)]) : undefined
-  );
+  const phone = ctx.from?.phone_number; // (bots don’t see this unless user is a Business; fallback via DB on username)
+  // If user already verified before, we can look them up by ID we stored later; for now we ask them to /share.
+  await ctx.reply('Please use /share and press the contact button so I can match your phone with our form.');
 });
 
-/* ----- CONTACT FLOW ----- */
+// Handle contact share
 bot.on('contact', async (ctx) => {
-  try {
-    const contact = (ctx.message as any)?.contact;
-    if (!contact?.phone_number) {
-      await ctx.reply('Could not read your phone. Please tap /share again.');
-      return;
-    }
-    const tgId = ctx.from!.id;
+  const contact = ctx.message?.contact;
+  if (!contact || contact.user_id !== ctx.from.id) {
+    return ctx.reply('Please press the button to share **your own** contact.', { parse_mode: 'Markdown' });
+  }
 
-    // re-send if exists
-    const already = getIssuedByTelegramId(tgId);
-    if (already) {
-      const label = already.exec_username ? at(already.exec_username) : '(pending)';
-      await ctx.replyWithHTML(
-        `Verify successfully!\n` +
-          `Job code: <code>${esc(already.code)}</code>\n` +
-          `Executive service: ${esc(label)}`,
-        already.exec_username ? Markup.inlineKeyboard([Markup.button.url(`Message ${label}`, `https://t.me/${already.exec_username}`)]) : undefined
-      );
-      return;
-    }
+  const tgE164 = toE164(contact.phone_number);
+  if (!tgE164) return ctx.reply('Cannot read your phone number. Please try again.');
 
-    // find matching lead
-    const lead = findLeadByPhoneAny(contact.phone_number);
-    if (!lead) {
-      await ctx.reply(
-        `Mobile phone number verification failed\n\n` +
-          `Please submit the form again using this same phone number, then tap /share.`
-      );
-      return;
-    }
-
-    const issued = getOrCreateCodeFor(lead.id, tgId);
-    const exec = assignExecutiveToIssued(issued.id);
-
-    // DM to user
-    const label = exec?.username ? at(exec.username) : '(pending)';
-    await ctx.replyWithHTML(
-      `Verify successfully!\n` +
-        `Job code: <code>${esc(issued.code)}</code>\n` +
-        `Executive service: ${esc(label)}`,
-      exec?.username ? Markup.inlineKeyboard([Markup.button.url(`Message ${label}`, `https://t.me/${exec.username}`)]) : undefined
+  const lead = getLeadByPhone.get(tgE164);
+  if (!lead) {
+    return ctx.reply(
+      'Mobile phone number verification failed.\n' +
+      'It is different from the mobile phone number you submitted in the form.\n\n' +
+      'Please fill the form again with the exact same phone as your Telegram number.'
     );
+  }
 
-    // ===== Group notification — single block; IP is monospace via <code> =====
-    if (GROUP_ID) {
-      const fullName = `${ctx.from?.first_name || ''} ${ctx.from?.last_name || ''}`.trim() || '(no name)';
-      const username = ctx.from?.username ? '@' + ctx.from.username : '(none)';
+  const workCode = ensureWorkCode(lead);
+  const assign = getAssignmentStmt.get({ p: lead.phone_e164 });
+  const execUsername = assign?.exec_username;
 
-      const phoneFromLead =
-        (lead.phone_e164 && lead.phone_e164.trim()) ? lead.phone_e164.trim() :
-        (lead.phone_raw && lead.phone_raw.trim()) ? ensurePlus(lead.phone_raw.trim()) :
-        ensurePlus(contact.phone_number);
+  // Send code to user (with optional Executive DM button)
+  const buttons = [];
+  if (execUsername) {
+    buttons.push([Markup.button.url(`Contact ${execUsername}`, `https://t.me/${execUsername.replace(/^@/, '')}`)]);
+  }
+  await ctx.reply(
+    [
+      'Your work code is used to verify your identity.',
+      '',
+      '*Verify successfully!*',
+      `Job code: \`${workCode}\``,
+      execUsername ? `Executive: @${execUsername.replace(/^@/, '')}` : '',
+    ].filter(Boolean).join('\n'),
+    { parse_mode: 'Markdown', ...(buttons.length ? Markup.inlineKeyboard(buttons) : {}) }
+  );
 
-      const usedPhone = phoneFromLead || ensurePlus(contact.phone_number);
-      const ip = lead.ip || '::1';
-
-      // Age from DB; show blank if missing
-      const ageStr =
-        (typeof lead.age === 'number' && Number.isFinite(lead.age)) ? String(lead.age) :
-        (typeof lead.age === 'string' && lead.age.trim().length > 0 ? lead.age.trim() : '');
-
-      const text =
-`Name: ${esc(fullName)}
-Age: ${esc(ageStr)}
-Username: ${esc(username)}
-Phone: ${esc(usedPhone)}
-IP: <code>${esc(ip)}</code>
-Code: ${esc(issued.code)}`;
-
-      await ctx.telegram.sendMessage(GROUP_ID, text, { parse_mode: 'HTML', disable_web_page_preview: true });
-      markGroupPosted(tgId);
-    }
-  } catch (err) {
-    console.error('[CONTACT ERROR]', err);
-    await ctx.reply('Something went wrong. Please try again in a minute.');
+  // Post once to group
+  if (!lead.group_posted) {
+    const lines = [
+      `<b>Applying Job</b>`,
+      `Name: ${esc(lead.name ?? ctx.from.first_name ?? '-')}`,
+      `Age: ${lead.age ?? '-'}`,
+      `Phone: ${esc(lead.phone_e164)}`,
+      `IP: ${esc(lead.ip ?? '-')}`,
+      `Code: <code>${workCode}</code>`
+    ].join('\n');
+    await ctx.telegram.sendMessage(GROUP_ID, lines, { parse_mode: 'HTML' });
+    markPostedStmt.run(lead.id);
   }
 });
 
-/* ----- GROUP ADMIN COMMANDS (/add /remove /status) ----- */
-function inGroup(ctx:any) {
-  return ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup';
-}
-function isOwner(ctx:any) {
-  return !OWNER_ID || ctx.from?.id === OWNER_ID;
+/** ---------- Owner / Group commands ---------- */
+function ownerOnly(ctx: Context): boolean {
+  if (ctx.from?.id !== OWNER_ID) {
+    ctx.reply('Owner only.');
+    return false;
+  }
+  return true;
 }
 
-// /add +918437372782 @username
-bot.hears(/^\/add(?:@[\w_]+)?\s+(.+?)\s+(@?\w+)\s*$/i, async (ctx) => {
-  if (!(inGroup(ctx) && isOwner(ctx))) return;
-  const phone = digitsOnly((ctx as any).match[1]);
-  const username = ((ctx as any).match[2]).replace(/^@/, '');
-  const row = db.prepare(`SELECT * FROM executives WHERE phone_digits = ?`).get(phone) as any;
-  if (row) {
-    db.prepare(`UPDATE executives SET username = ?, is_active = 1 WHERE id = ?`).run(username, row.id);
-  } else {
-    db.prepare(`INSERT INTO executives (phone_digits, username, display_name, is_active) VALUES (?,?,?,1)`)
-      .run(phone, username, username);
-  }
-  const exec = db.prepare(`SELECT * FROM executives WHERE phone_digits = ?`).get(phone) as any;
-  await ctx.reply(
-`Added/updated executive:
-• Phone: ${exec.phone_digits}
-• Username: @${exec.username}
-• Active: Yes
-• Assigned: ${countAssigned(exec.id)} ✅`
+bot.command('add', async (ctx) => {
+  if (!ownerOnly(ctx)) return;
+  const text = ctx.message?.text ?? '';
+  const parts = text.split(/\s+/).slice(1); // after /add
+  // Expect: /add <phone> <username>
+  if (parts.length < 2) return ctx.reply('Usage: /add <phone> <username>');
+  const phone = toE164(parts[0]);
+  const user = parts[1].replace(/^@/, '');
+  if (!phone) return ctx.reply('Invalid phone');
+
+  upsertAssignmentStmt.run(phone, user, ctx.from!.id);
+  // Small status card
+  ctx.replyWithHTML(
+    [
+      `<b>Added/updated executive:</b>`,
+      `• Phone: ${esc(phone)}`,
+      `• Username: @${esc(user)}`,
+    ].join('\n')
   );
 });
 
-// /remove +918437372782  OR  /remove @username
-bot.hears(/^\/remove(?:@[\w_]+)?\s+(.+?)\s*$/i, async (ctx) => {
-  if (!(inGroup(ctx) && isOwner(ctx))) return;
+bot.command('remove', async (ctx) => {
+  if (!ownerOnly(ctx)) return;
+  const phone = toE164((ctx.message?.text ?? '').split(/\s+/)[1] || '');
+  if (!phone) return ctx.reply('Usage: /remove <phone>');
 
-  const arg = ((ctx as any).match[1] || '').trim();
-  let row: any;
-
-  if (arg.startsWith('@')) {
-    const uname = arg.replace(/^@/, '');
-    row = db.prepare(`SELECT * FROM executives WHERE username = ?`).get(uname) as any;
-  } else {
-    const phone = digitsOnly(arg);
-    row = db.prepare(`SELECT * FROM executives WHERE phone_digits = ?`).get(phone) as any;
-  }
-
-  if (!row) {
-    await ctx.reply(`No executive found for "${arg}". Use a phone or @username.`);
-    return;
-  }
-
-  db.prepare(`UPDATE executives SET is_active = 0 WHERE id = ?`).run(row.id);
-  await ctx.reply(`Removed executive with phone ${row.phone_digits}.`);
+  const info = removeAssignmentStmt.run(phone);
+  ctx.reply(info.changes ? `Removed mapping for ${phone}` : `Nothing to remove for ${phone}`);
 });
 
-// /status             -> active only (single message)
-// /status all         -> all (active first)
-// /status @username   -> that one only
-bot.hears(/^\/status(?:@[\w_]+)?(?:\s+(@?\w+|all))?\s*$/i, async (ctx) => {
-  if (!(inGroup(ctx) && isOwner(ctx))) return;
-
-  const arg = (((ctx as any).match[1]) || '').trim();
-  let rows: any[] = [];
-
-  if (!arg) {
-    rows = db.prepare(`SELECT * FROM executives WHERE is_active = 1 ORDER BY id ASC`).all() as any[];
-  } else if (arg.toLowerCase() === 'all') {
-    rows = db.prepare(`SELECT * FROM executives ORDER BY is_active DESC, id ASC`).all() as any[];
-  } else {
-    const uname = arg.replace(/^@/, '');
-    const r = db.prepare(`SELECT * FROM executives WHERE username = ?`).get(uname) as any;
-    rows = r ? [r] : [];
-  }
-
-  if (!rows.length) { await ctx.reply('No executives.'); return; }
-
-  const lines: string[] = [];
-  for (const r of rows) {
-    const count = countAssigned(r.id);
-    lines.push(`• @${r.username} (${r.phone_digits}) — assigned: ${count} ✅`);
-  }
-  await ctx.reply(lines.join('\n'));
+bot.command('status', async (ctx) => {
+  if (!ownerOnly(ctx)) return;
+  const rows = statusByExecStmt.all() as { exec_username: string; c: number }[];
+  if (!rows.length) return ctx.reply('No executive assignments yet.');
+  const lines = rows.map(r => `• @${r.exec_username} — assigned: ${r.c} ✅`);
+  ctx.reply(lines.join('\n'));
 });
 
-/* ========= LAUNCH ========= */
+/** ---------- fallback ---------- */
+bot.on('message', async (ctx) => {
+  // Encourage the user towards /share
+  await ctx.reply('Please click the button below to share your contact information.', shareKeyboard);
+});
+
+/** ---------- start ---------- */
 bot.launch().then(() => {
-  console.log('🤖 Bot is running (long polling). Press Ctrl+C to stop.');
+  console.log('Bot is up.');
 });
+
+// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
