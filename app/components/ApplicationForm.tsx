@@ -11,8 +11,8 @@ const BOT_USERNAME =
 
 // Minimal country list (add more as needed)
 const COUNTRIES = [
-  { iso: 'us', name: 'USA/Canada', dial: '+1' },
   { iso: 'in', name: 'India', dial: '+91' },
+  { iso: 'us', name: 'USA/Canada', dial: '+1' },
   { iso: 'mm', name: 'Myanmar', dial: '+95' },
   { iso: 'sg', name: 'Singapore', dial: '+65' },
   { iso: 'gb', name: 'United Kingdom', dial: '+44' },
