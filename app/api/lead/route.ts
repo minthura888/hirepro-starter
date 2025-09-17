@@ -9,7 +9,6 @@ import Database from 'better-sqlite3';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Writable on Vercel; local/VPS can override via DATABASE_PATH
 const DB_PATH =
   process.env.DATABASE_PATH ||
   (process.env.VERCEL ? '/tmp/app.db' : path.join(process.cwd(), 'data', 'app.db'));
@@ -39,6 +38,8 @@ function ensureSchema() {
 ensureSchema();
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN || '*';
+const ADMIN_KEY = process.env.ADMIN_KEY || null;
+
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': WEB_ORIGIN,
@@ -52,25 +53,30 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() as any });
 }
 
-// ------- GET /api/lead?limit=10  -> inspect recent leads -------
+// ------- GET /api/lead?limit=10&key=... -------
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(
-      100,
-      parseInt(searchParams.get('limit') || '10', 10) || 10
-    );
+    if (ADMIN_KEY) {
+      const key = searchParams.get('key');
+      if (key !== ADMIN_KEY) {
+        return NextResponse.json(
+          { ok: false, error: 'Forbidden' },
+          { status: 403, headers: corsHeaders() as any }
+        );
+      }
+    }
 
+    const limit = Math.min(100, parseInt(searchParams.get('limit') || '10', 10) || 10);
     const rows = db
       .prepare<[number], any>(
         'SELECT id,name,email,phone_e164,gender,age,created_at FROM leads ORDER BY id DESC LIMIT ?'
       )
       .all(limit);
-
     const countRow = db.prepare<[], any>('SELECT COUNT(*) AS c FROM leads').get();
 
     return NextResponse.json(
-      { ok: true, count: countRow.c as number, rows },
+      { ok: true, count: Number(countRow.c || 0), rows },
       { headers: corsHeaders() as any }
     );
   } catch (err: any) {
@@ -81,13 +87,13 @@ export async function GET(req: Request) {
   }
 }
 
-// ------- POST /api/lead  -> save a submission -------
+// ------- POST /api/lead -------
 const BodySchema = z.object({
   name: z.string().trim().min(1),
   email: z.string().email().trim(),
   countryIso: z.string().trim(),
   dial: z.string().trim(),
-  phone: z.string().trim(), // digits only (local part)
+  phone: z.string().trim(), // digits only local part
   gender: z.enum(['male', 'female']).optional(),
   age: z.coerce.number().int().min(16).max(99).optional(),
   note: z.string().trim().max(500).optional().nullable(),
@@ -95,9 +101,7 @@ const BodySchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const json = await req.json();
-    const data = BodySchema.parse(json);
-
+    const data = BodySchema.parse(await req.json());
     const ip =
       (req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for') || '')
         .split(',')[0]
@@ -109,16 +113,8 @@ export async function POST(req: Request) {
     const info = db
       .prepare<
         [
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          number | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null
+          string | null, string | null, string | null, string | null,
+          number | null, string | null, string | null, string | null, string | null, string | null
         ]
       >(`
         INSERT INTO leads
@@ -138,15 +134,11 @@ export async function POST(req: Request) {
         ip || null
       );
 
-    const insertedId = Number(info.lastInsertRowid);
     const inserted = db
       .prepare<[number], any>('SELECT * FROM leads WHERE id = ?')
-      .get(insertedId);
+      .get(Number(info.lastInsertRowid));
 
-    return NextResponse.json(
-      { ok: true, inserted },
-      { headers: corsHeaders() as any }
-    );
+    return NextResponse.json({ ok: true, inserted }, { headers: corsHeaders() as any });
   } catch (err: any) {
     console.error('Lead save error:', err?.message || err);
     return NextResponse.json(
