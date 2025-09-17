@@ -3,22 +3,55 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Blue theme tokens */
+/* ------------ theme tokens ------------ */
 :root{
-  --brand: #2563eb;           /* primary blue 600 */
+  --brand: #2563eb;           /* blue-600 */
   --brand-muted: #e0ecff;     /* very light blue */
   --dark: #0f172a;            /* slate-900 */
   --light: #f8fafc;           /* slate-50 */
   --text: #0f172a;            /* slate-900 */
 }
 
-/* Helpers */
-.btn-primary{
-  @apply inline-flex items-center justify-center rounded-xl px-5 py-3 font-medium text-white bg-[var(--brand)] hover:opacity-95 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)];
+/* ------------ base (applies without adding classes) ------------ */
+@layer base {
+  html { @apply scroll-smooth; }
+  body { @apply bg-[var(--light)] text-[var(--text)] antialiased; }
+
+  h1 { @apply text-3xl md:text-4xl font-bold tracking-tight; }
+  h2 { @apply text-2xl md:text-3xl font-semibold tracking-tight mt-10 mb-4; }
+  h3 { @apply text-xl md:text-2xl font-semibold tracking-tight mt-8 mb-3; }
+
+  p  { @apply text-slate-700 leading-relaxed; }
+  a  { @apply text-[var(--brand)] hover:underline; }
+
+  /* form defaults */
+  input, select, textarea {
+    @apply rounded-xl border border-slate-300 px-3 py-2 bg-white
+           focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)];
+  }
+  label { @apply text-sm font-medium text-slate-700; }
+  button { @apply cursor-pointer; }
 }
-.btn-secondary{
-  @apply inline-flex items-center justify-center rounded-xl px-5 py-3 font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)];
-}
-.card-like{
-  @apply rounded-2xl border border-slate-200 bg-white;
+
+/* ------------ components ------------ */
+@layer components {
+  .container-page { @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8; }
+
+  .btn-primary{
+    @apply inline-flex items-center justify-center rounded-xl px-5 py-3
+           font-medium text-white bg-[var(--brand)]
+           hover:opacity-95 focus:outline-none
+           focus:ring-4 focus:ring-[var(--brand-muted)];
+  }
+
+  .btn-secondary{
+    @apply inline-flex items-center justify-center rounded-xl px-5 py-3
+           font-medium border border-slate-200 text-slate-700
+           hover:bg-slate-50 focus:outline-none
+           focus:ring-4 focus:ring-[var(--brand-muted)];
+  }
+
+  .card-like{
+    @apply rounded-2xl border border-slate-200 bg-white shadow-card;
+  }
 }
