@@ -1,3 +1,4 @@
+// app/components/PixelRouteTracker.tsx
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -16,10 +17,10 @@ export default function PixelRouteTracker() {
 
   useEffect(() => {
     if (isFirstLoad.current) {
+      // already tracked by layout.tsx
       isFirstLoad.current = false;
       return;
     }
-
     if (typeof window !== "undefined" && typeof window.fbq === "function") {
       window.fbq("track", "PageView");
     }
