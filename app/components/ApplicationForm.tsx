@@ -2,11 +2,12 @@
 
 import React, { useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
+// ✅ Your Google Apps Script Web App URL
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbyKBHFXnNK_PyC5xpLVKpOldAcj6nayN32pybdrs4iPv2-192IiyIFpsiukU6qVZzFEdQ/exec";
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
 
 const COUNTRIES = [
-  { iso: 'in', name: 'India', dial: '+91' },       // default first
+  { iso: 'in', name: 'India', dial: '+91' },
   { iso: 'us', name: 'USA/Canada', dial: '+1' },
   { iso: 'mm', name: 'Myanmar', dial: '+95' },
   { iso: 'sg', name: 'Singapore', dial: '+65' },
@@ -15,7 +16,7 @@ const COUNTRIES = [
 
 export default function ApplicationForm() {
   const [name, setName] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // +91 default
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [age, setAge] = useState<string>('');
@@ -24,7 +25,13 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
+  function digitsOnly(v: string) {
+    return v.replace(/\D+/g, '');
+  }
+
+  function generateWorkCode() {
+    return 'WC-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,37 +44,48 @@ export default function ApplicationForm() {
     const ageNum = Number(age || '0');
     if (!ageNum || ageNum < 16 || ageNum > 99) return setError('Please enter a valid age (16–99).');
 
-    const payload = {
-      name: name.trim(),
-      email: email.trim(),
-      countryIso: selectedCountry.iso,
-      dial: selectedCountry.dial,
-      phone: local,
-      gender,
-      age: ageNum,
-      note: null as string | null,
-    };
+    const e164Phone = `${selectedCountry.dial}${local}`;
+    const workCode = generateWorkCode();
 
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/lead`, {
+      // ✅ Fetch IP
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipData = await ipRes.json();
+      const ipAddress = ipData.ip || "unknown";
+
+      // ✅ Payload for Google Sheet
+      const payload = {
+        name: name.trim(),
+        email: email.trim(),
+        countryIso: selectedCountry.iso,
+        phone: e164Phone,
+        gender,
+        age: ageNum,
+        workCode,
+        ipAddress,
+      };
+
+      const res = await fetch(SHEET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok || !data?.ok) throw new Error(data?.error || `Save failed (${res.status})`);
 
       setOkMsg('Saved! Opening Telegram…');
 
-      // ✅ Fire Lead event here (only on success)
+      // ✅ Fire Lead event
       if (typeof window !== 'undefined' && typeof (window as any).fbq === 'function') {
-        (window as any).fbq('track', 'Lead');
+        (window as any).fbq('track', 'Lead', { workCode, ipAddress });
       }
 
-      // Open bot WITHOUT passing any code
+      // ✅ Open Telegram bot
       window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
 
+      // Reset form
       setName(''); setPhone(''); setAge(''); setEmail('');
     } catch (err: any) {
       setError(err?.message || 'Save failed.');
@@ -86,44 +104,35 @@ export default function ApplicationForm() {
         {/* Name */}
         <div className="mt-4">
           <label className="block text-sm font-medium text-slate-700">* Name</label>
-          <input
-            type="text" value={name} onChange={(e) => setName(e.target.value)}
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Please enter your name"
-            className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+            className="mt-2 w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
         </div>
 
-        {/* Phone (3:7 grid) */}
+        {/* Phone */}
         <div className="mt-6">
           <label className="block text-sm font-medium text-slate-700">* Telegram phone number</label>
           <div className="mt-2 grid grid-cols-10 gap-3">
             <div className="col-span-3">
               <select
                 value={selectedCountry.iso}
-                onChange={(e) =>
-                  setSelectedCountry(
-                    COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0]
-                  )
-                }
-                className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+                onChange={(e) => setSelectedCountry(COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0])}
+                className="w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
               >
                 {COUNTRIES.map((c) => (
-                  <option key={c.iso} value={c.iso}>
-                    {c.dial} — {c.name}
-                  </option>
+                  <option key={c.iso} value={c.iso}>{c.dial} — {c.name}</option>
                 ))}
               </select>
             </div>
             <div className="col-span-7">
-              <input
-                type="tel" inputMode="numeric"
-                value={phone} onChange={(e) => setPhone(e.target.value)}
+              <input type="tel" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)}
                 placeholder="Telephone number (digits only)"
-                className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+                className="w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
               />
             </div>
           </div>
-          <p className="mt-1 text-xs text-slate-500">Enter digits only. We’ll combine it with the country code.</p>
+          <p className="mt-1 text-xs text-slate-500">We’ll combine this with your country code.</p>
         </div>
 
         {/* Gender */}
@@ -131,12 +140,10 @@ export default function ApplicationForm() {
           <label className="block text-sm font-medium text-slate-700">* Gender</label>
           <div className="mt-2 flex items-center gap-6">
             <label className="inline-flex items-center gap-2">
-              <input type="radio" name="gender" checked={gender === 'male'} onChange={() => setGender('male')} />
-              <span>Male</span>
+              <input type="radio" name="gender" checked={gender === 'male'} onChange={() => setGender('male')} /> Male
             </label>
             <label className="inline-flex items-center gap-2">
-              <input type="radio" name="gender" checked={gender === 'female'} onChange={() => setGender('female')} />
-              <span>Female</span>
+              <input type="radio" name="gender" checked={gender === 'female'} onChange={() => setGender('female')} /> Female
             </label>
           </div>
         </div>
@@ -144,21 +151,18 @@ export default function ApplicationForm() {
         {/* Age */}
         <div className="mt-6">
           <label className="block text-sm font-medium text-slate-700">* Age</label>
-          <input
-            type="number" min={16} max={99}
-            value={age} onChange={(e) => setAge(e.target.value)}
+          <input type="number" min={16} max={99} value={age} onChange={(e) => setAge(e.target.value)}
             placeholder="Please enter your age"
-            className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+            className="mt-2 w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
         </div>
 
         {/* Email */}
         <div className="mt-6">
           <label className="block text-sm font-medium text-slate-700">* Email</label>
-          <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             placeholder="Please enter your email address"
-            className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+            className="mt-2 w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
           />
         </div>
 
