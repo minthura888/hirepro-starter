@@ -1,7 +1,8 @@
+// app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
-import MetaPixel from "@/components/MetaPixel";
-import PixelRouteTracker from "@/components/PixelRouteTracker";
+import MetaPixel from "@/components/MetaPixel"; // this stays the same
+import PixelRouteTracker from "./components/PixelRouteTracker"; // <-- fixed path
 
 export const metadata: Metadata = {
   title: "HirePro Starter",
