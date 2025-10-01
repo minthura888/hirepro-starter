@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || "applyyourjob_bot";
-
 type Gender = "male" | "female";
 
 const COUNTRIES = [
@@ -27,11 +26,12 @@ export default function ApplicationForm() {
 
   const digitsOnly = (v: string) => v.replace(/\D+/g, "");
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setOkMsg(null);
 
+    // Basic validation
     if (!name.trim()) return setError("Please enter your name.");
     const local = digitsOnly(phone);
     if (!local) return setError("Please enter your Telegram phone number (digits only).");
@@ -40,27 +40,24 @@ export default function ApplicationForm() {
     if (!ageNum || ageNum < 16 || ageNum > 99) return setError("Please enter a valid age (16–99).");
 
     setSaving(true);
+
+    // Fire Meta Pixel Lead immediately (no awaits)
     try {
-      // Fire Meta Pixel Lead (no payload required, but we can send small hints)
       if (typeof window !== "undefined" && typeof (window as any).fbq === "function") {
-        (window as any).fbq("track", "Lead", {
-          country: selectedCountry.iso,
-        });
+        (window as any).fbq("track", "Lead", { country: selectedCountry.iso });
       }
+    } catch {}
 
-      setOkMsg("Opening Telegram…");
-      window.open(`https://t.me/${BOT_USERNAME}`, "_blank");
+    setOkMsg("Opening Telegram…");
 
-      // Reset
-      setName("");
-      setPhone("");
-      setAge("");
-      setEmail("");
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong.");
-    } finally {
-      setSaving(false);
-    }
+    // Open Telegram in SAME tab to avoid popup blockers
+    window.location.href = `https://t.me/${BOT_USERNAME}`;
+
+    // If you prefer a new tab instead, use:
+    // window.open(`https://t.me/${BOT_USERNAME}`, "_blank", "noopener,noreferrer");
+
+    // Reset (not really necessary since we're navigating away)
+    setSaving(false);
   }
 
   return (
