@@ -2,6 +2,10 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
+import { Suspense } from "react";
+import PixelRouteTracker from "./components/PixelRouteTracker";
+
+const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "1865880404348903";
 
 export const metadata: Metadata = {
   title: "HirePro Starter",
@@ -12,9 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel base code (hardcoded ID + fires PageView) */}
+        {/* Meta Pixel: INIT ONLY (no PageView here) */}
         <Script
-          id="meta-pixel"
+          id="meta-pixel-init"
           strategy="afterInteractive"
           dangerouslySetInnerHTML={{
             __html: `
@@ -26,8 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               t.src=v;s=b.getElementsByTagName(e)[0];
               s.parentNode.insertBefore(t,s)}(window, document,'script',
               'https://connect.facebook.net/en_US/fbevents.js');
-              fbq('init', '1865880404348903');
-              fbq('track', 'PageView');
+              fbq('init', '${PIXEL_ID}');
             `,
           }}
         />
@@ -35,13 +38,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
 
+        {/* PageView tracker (ensures exactly one hit per URL) */}
+        <Suspense>
+          <PixelRouteTracker />
+        </Suspense>
+
         {/* noscript fallback */}
         <noscript>
           <img
             height="1"
             width="1"
             style={{ display: "none" }}
-            src="https://www.facebook.com/tr?id=1865880404348903&ev=PageView&noscript=1"
+            src={`https://www.facebook.com/tr?id=${PIXEL_ID}&ev=PageView&noscript=1`}
           />
         </noscript>
       </body>
