@@ -1,4 +1,5 @@
-"use client"; // must be first
+// app/layout.tsx
+"use client";
 
 import "./globals.css";
 import Script from "next/script";
@@ -11,44 +12,43 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel: init once + PageView once (guarded) */}
+        {/* Meta Pixel: load once, init once, and fire ONE PageView on first load */}
         <Script id="fb-pixel-init" strategy="afterInteractive">
           {`
-            (function() {
-              // Guard against double init & double first PageView
+            (function () {
               if (!window.__MPX_INIT__) {
                 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
                 n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
                 n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
                 t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
-                (window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
+                (window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
 
                 fbq('init', '${PIXEL_ID}');
                 window.__MPX_INIT__ = true;
               }
 
               if (!window.__MPX_PV_ONLOAD__) {
-                fbq('track', 'PageView');         // first load only
+                fbq('track', 'PageView');
                 window.__MPX_PV_ONLOAD__ = true;
               }
             })();
           `}
         </Script>
 
-        {/* noscript fallback (doesn't cause duplicates) */}
+        {/* noscript fallback (doesn't double-fire when JS is enabled) */}
         <noscript>
           <img
             height="1"
             width="1"
-            style={{ display: "none" }}
+            style={{ display: "none" } as any}
             src={`https://www.facebook.com/tr?id=${PIXEL_ID}&ev=PageView&noscript=1`}
+            alt=""
           />
         </noscript>
       </head>
       <body>
         {children}
-
-        {/* Route-change tracking (must be wrapped in Suspense) */}
+        {/* fires PageView on client-side route changes only (skips first load) */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
