@@ -1,6 +1,6 @@
-"use client";  // 👈 must be the very first line
+"use client"; // must be first
 
-import "./globals.css";   // load Tailwind styles
+import "./globals.css";
 import Script from "next/script";
 import { Suspense } from "react";
 import PixelRouteTracker from "./components/PixelRouteTracker";
@@ -11,18 +11,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* ✅ Facebook Meta Pixel Code */}
-        <Script id="facebook-pixel" strategy="afterInteractive">
+        {/* Meta Pixel: init + PageView (first load) */}
+        <Script id="fb-pixel-init" strategy="afterInteractive">
           {`
+            console.log('[Pixel] injecting…');
             !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
             n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
             n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
             t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
             (window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
+
             fbq('init', '${PIXEL_ID}');
             fbq('track', 'PageView');
+            console.log('[Pixel] init + first PageView fired with ID ${PIXEL_ID}');
           `}
         </Script>
+
+        {/* noscript fallback */}
         <noscript>
           <img
             height="1"
@@ -34,6 +39,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
+
+        {/* Track client-side navigations; required Suspense wrapper */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
