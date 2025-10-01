@@ -1,55 +1,49 @@
-// app/layout.tsx  (SERVER component – no "use client")
-import "./globals.css";
+// app/layout.tsx
+import type { Metadata } from "next";
 import Script from "next/script";
-import { Suspense } from "react";
-import PixelRouteTracker from "./components/PixelRouteTracker";
+import "./globals.css";
 
-const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "1865880404348903";
+export const metadata: Metadata = {
+  title: "HirePro Starter",
+  description: "Landing page",
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel: load once, init once, and fire ONE PageView on first load */}
-        <Script id="fb-pixel-init" strategy="afterInteractive">
-          {`
-            (function () {
-              if (!window.__MPX_INIT__) {
-                !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-                n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
-                n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
-                t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
-                (window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
-
-                fbq('init', '${PIXEL_ID}');
-                window.__MPX_INIT__ = true;
-              }
-
-              if (!window.__MPX_PV_ONLOAD__) {
-                fbq('track', 'PageView');
-                window.__MPX_PV_ONLOAD__ = true;
-              }
-            })();
-          `}
-        </Script>
+        {/* Meta Pixel base code (hardcoded ID + fires PageView) */}
+        <Script
+          id="meta-pixel"
+          strategy="afterInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              !function(f,b,e,v,n,t,s)
+              {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+              n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+              if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+              n.queue=[];t=b.createElement(e);t.async=!0;
+              t.src=v;s=b.getElementsByTagName(e)[0];
+              s.parentNode.insertBefore(t,s)}(window, document,'script',
+              'https://connect.facebook.net/en_US/fbevents.js');
+              fbq('init', '1865880404348903');
+              fbq('track', 'PageView');
+            `,
+          }}
+        />
+      </head>
+      <body>
+        {children}
 
         {/* noscript fallback */}
         <noscript>
           <img
             height="1"
             width="1"
-            style={{ display: "none" } as any}
-            src={`https://www.facebook.com/tr?id=${PIXEL_ID}&ev=PageView&noscript=1`}
-            alt=""
+            style={{ display: "none" }}
+            src="https://www.facebook.com/tr?id=1865880404348903&ev=PageView&noscript=1"
           />
         </noscript>
-      </head>
-      <body>
-        {children}
-        {/* Fires PageView on client-side route changes only (skips first load) */}
-        <Suspense fallback={null}>
-          <PixelRouteTracker />
-        </Suspense>
       </body>
     </html>
   );
