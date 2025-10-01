@@ -1,4 +1,5 @@
 // app/layout.tsx
+import "./globals.css";   // 👈 This loads your Tailwind/global styles
 "use client";
 
 import Script from "next/script";
@@ -11,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel: init + PageView on first load only */}
+        {/* ✅ Facebook Meta Pixel Code */}
         <Script id="facebook-pixel" strategy="afterInteractive">
           {`
             !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -33,9 +34,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </noscript>
       </head>
       <body>
+        {/* Your app content */}
         {children}
 
-        {/* IMPORTANT: wrap the hook user in Suspense */}
+        {/* ✅ Track PageViews on client-side navigations */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
