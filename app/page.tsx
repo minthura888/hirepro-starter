@@ -58,7 +58,7 @@ export default function Page() {
       <section className="relative bg-[var(--brand-muted)]">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
           <h1 className="text-4xl sm:text-5xl font-bold leading-tight tracking-tight text-[var(--brand)]">
-            Grab our jobs
+            Grab your jobs
           </h1>
           <p className="mt-5 text-slate-700 text-lg">
             From everywhere! Working on the Internet gives you the opportunity to earn money anywhere.
