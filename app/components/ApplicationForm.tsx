@@ -7,14 +7,17 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
 
 const COUNTRIES = [
-  { iso: 'in', name: 'India', dial: '+91' },       // default first
+  { iso: 'in', name: 'India', dial: '+91' },       // default
   { iso: 'us', name: 'USA/Canada', dial: '+1' },
   { iso: 'mm', name: 'Myanmar', dial: '+95' },
   { iso: 'sg', name: 'Singapore', dial: '+65' },
   { iso: 'gb', name: 'United Kingdom', dial: '+44' },
 ];
 
-function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
+const isMobileUA = () =>
+  /iPhone|iPad|iPod|Android/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent);
+
+const onlyDigits = (v: string) => v.replace(/\D+/g, '');
 
 export default function ApplicationForm() {
   const [name, setName] = useState('');
@@ -27,10 +30,10 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  // Build canonical E.164 (what your bot sees): +<country><digits>
+  // Canonical E.164 used by Telegram: +<country><localDigits>
   const phoneE164 = useMemo(() => {
-    const cc = digitsOnly(selectedCountry.dial);
-    const local = digitsOnly(phone);
+    const cc = onlyDigits(selectedCountry.dial);
+    const local = onlyDigits(phone);
     if (!cc || !local) return '';
     return `+${cc}${local}`;
   }, [selectedCountry, phone]);
@@ -40,32 +43,31 @@ export default function ApplicationForm() {
     setError(null);
     setOkMsg(null);
 
-    // Basic validation
+    // validation
     if (!name.trim()) { setError('Please enter your name.'); return; }
     if (!email.trim()) { setError('Please enter a valid email.'); return; }
     const ageNum = Number(age || '0');
     if (!ageNum || ageNum < 16 || ageNum > 99) { setError('Please enter a valid age (16–99).'); return; }
     if (!phoneE164) { setError('Please enter your Telegram phone number.'); return; }
 
-    // what your API already expects, plus phoneE164
     const payload = {
       name: name.trim(),
       email: email.trim(),
       countryIso: selectedCountry.iso,
       dial: selectedCountry.dial,
-      phone: digitsOnly(phone), // old field
-      phoneE164,                // NEW: canonical — ask your bot/backend to compare this
+      phone: onlyDigits(phone),   // legacy field
+      phoneE164,                  // canonical field for the bot to match
       gender,
       age: ageNum,
       note: null as string | null,
     };
 
-    // 1) Fire Lead now; small delay lets pixel send before deep-link
+    // 1) Track Lead now; tiny delay later gives it time to flush
     try { fbqTrack('Lead', { action: 'form_submit' }); } catch {}
     setSaving(true);
     setOkMsg('Saved! Opening Telegram…');
 
-    // 2) send form in the background (do NOT await)
+    // 2) Post in the background (no await)
     try {
       const body = JSON.stringify(payload);
       if ('sendBeacon' in navigator) {
@@ -81,29 +83,32 @@ export default function ApplicationForm() {
       }
     } catch {}
 
-    // 3) After ~120ms (enough for pixel), open Telegram (still reliable)
+    // 3) After ~120ms (lets Pixel send), open Telegram.
     const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
     const tgWeb = `https://t.me/${BOT_USERNAME}`;
     const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
 
     setTimeout(() => {
-      // open app scheme first
-      location.href = tgApp;
-
-      // fallbacks
-      setTimeout(() => {
-        if (document.visibilityState === 'hidden') return; // app likely opened
-        const isAndroid = /Android/i.test(navigator.userAgent);
-        if (isAndroid) {
-          location.href = tgIntent;
-          setTimeout(() => {
-            if (document.visibilityState === 'hidden') return;
+      if (isMobileUA()) {
+        // Mobile: same-tab deep link for reliability
+        location.href = tgApp;
+        setTimeout(() => {
+          if (document.visibilityState === 'hidden') return;
+          const isAndroid = /Android/i.test(navigator.userAgent);
+          if (isAndroid) {
+            location.href = tgIntent;
+            setTimeout(() => {
+              if (document.visibilityState === 'hidden') return;
+              location.href = tgWeb;
+            }, 500);
+          } else {
             location.href = tgWeb;
-          }, 500);
-        } else {
-          location.href = tgWeb;
-        }
-      }, 700);
+          }
+        }, 700);
+      } else {
+        // Desktop: new tab so you can watch Pixel Helper in this tab
+        window.open(tgWeb, '_blank', 'noopener,noreferrer');
+      }
     }, 120);
   };
 
