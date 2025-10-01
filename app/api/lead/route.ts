@@ -83,7 +83,7 @@ function createUniqueWorkCode(): string {
   return crypto.randomBytes(8).toString('hex').slice(0, 8).toUpperCase();
 }
 
-// ---------- GET (admin view) ----------
+// ---------- GET (admin view + lookup-by-e164) ----------
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -95,6 +95,20 @@ export async function GET(req: Request) {
       }
     }
 
+    // NEW: lookup mode
+    const e164 = (searchParams.get('e164') || '').trim();
+    if (e164) {
+      const row = db.prepare(`
+        SELECT id, name, email, phone_e164, gender, age, work_code, created_at
+        FROM leads WHERE phone_e164 = ?
+      `).get(e164);
+      if (!row) {
+        return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404, headers: corsHeaders() });
+      }
+      return NextResponse.json({ ok: true, row }, { headers: corsHeaders() });
+    }
+
+    // default: list
     const limit = Math.min(100, parseInt(searchParams.get('limit') || '10', 10) || 10);
     const rows = db.prepare(`
       SELECT id, name, email, phone_e164, gender, age, work_code, ip, created_at
