@@ -16,33 +16,39 @@ export default function MetaPixel() {
   useEffect(() => {
     if (!PIXEL_ID) return;
 
-    // hard guard against double init during Fast Refresh or multiple mounts
+    // Guard: avoid double init on fast refresh or multiple mounts
     if (typeof window !== "undefined" && window.__fbqInitialized) {
       return;
     }
 
-    !(function (f: any, b: any, e: any, v: any, n?: any, t?: any, s?: any) {
-      if (f.fbq) return;
-      n = f.fbq = function () {
-        (n as any).callMethod ? (n as any).callMethod.apply(n, arguments) : (n as any).queue.push(arguments);
+    // Set up stub if not present
+    if (typeof window !== "undefined" && !window.fbq) {
+      const n: any = function (...args: any[]) {
+        // callMethod exists after the real script loads
+        if ((n as any).callMethod) {
+          (n as any).callMethod.apply(n, args);
+        } else {
+          (n as any).queue.push(args);
+        }
       };
-      if (!f._fbq) f._fbq = n;
-      (n as any).push = (n as any);
+      (n as any).queue = [];
       (n as any).loaded = true;
       (n as any).version = "2.0";
-      (n as any).queue = [];
-      t = b.createElement(e);
-      t.async = true;
-      t.src = "https://connect.facebook.net/en_US/fbevents.js";
-      s = b.getElementsByTagName(e)[0];
-      s.parentNode!.insertBefore(t, s);
-    })(window, document, "script");
+      window.fbq = n;
+      window._fbq = n;
 
-    window.fbq!("init", PIXEL_ID);
-    window.fbq!("track", "PageView"); // initial load only
+      // load the real script
+      const s = document.createElement("script");
+      s.async = true;
+      s.src = "https://connect.facebook.net/en_US/fbevents.js";
+      document.head.appendChild(s);
+    }
+
+    // Initial load only
+    window.fbq?.("init", PIXEL_ID);
+    window.fbq?.("track", "PageView");
     window.__fbqInitialized = true;
   }, [PIXEL_ID]);
 
-  // noscript pixel (optional)
   return null;
 }
