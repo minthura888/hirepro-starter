@@ -25,15 +25,38 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 fbq('init', '${PIXEL_ID}');
                 window.__MPX_INIT__ = true;
               }
+
+              // Guard: only allow ONE PageView ever from "first load"
               if (!window.__MPX_PV_ONLOAD__) {
-                fbq('track', 'PageView');  // first load only
+                fbq('track', 'PageView');
                 window.__MPX_PV_ONLOAD__ = true;
+              }
+
+              // Wrap fbq to ignore any extra PageView calls (from other code)
+              if (!window.__MPX_FBQ_WRAPPED__) {
+                var __orig = window.fbq;
+                window.fbq = function() {
+                  try {
+                    if (arguments && arguments[0] === 'track' && arguments[1] === 'PageView') {
+                      if (window.__MPX_PV_BLOCKED__) return;
+                      // If first-load PageView has already happened, allow others
+                      // but block immediate duplicates during same load.
+                      if (window.__MPX_PV_ONLOAD__ && window.__MPX_PV_SEEN_ON_LOAD__) {
+                        // block duplicate "on-load" PV from other snippets
+                        window.__MPX_PV_BLOCKED__ = true;
+                        return;
+                      }
+                      window.__MPX_PV_SEEN_ON_LOAD__ = true;
+                    }
+                  } catch (e) {}
+                  return __orig.apply(this, arguments);
+                };
+                window.__MPX_FBQ_WRAPPED__ = true;
               }
             })();
           `}
         </Script>
 
-        {/* noscript fallback */}
         <noscript>
           <img
             height="1"
@@ -45,7 +68,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        {/* Track client-side navigations (must be inside Suspense) */}
+        {/* Track client-side navigations (one PV per unique URL) */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
