@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import MetaPixel from "@/components/MetaPixel";
+import PixelRouteTracker from "@/components/PixelRouteTracker";
 
 export const metadata: Metadata = {
   title: "HirePro Starter",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <MetaPixel />
+        <PixelRouteTracker />
         {children}
       </body>
     </html>
