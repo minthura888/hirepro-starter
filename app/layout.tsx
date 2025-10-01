@@ -1,7 +1,6 @@
-// app/layout.tsx
-import "./globals.css";   // 👈 This loads your Tailwind/global styles
-"use client";
+"use client";  // 👈 must be the very first line
 
+import "./globals.css";   // load Tailwind styles
 import Script from "next/script";
 import { Suspense } from "react";
 import PixelRouteTracker from "./components/PixelRouteTracker";
@@ -34,10 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </noscript>
       </head>
       <body>
-        {/* Your app content */}
         {children}
-
-        {/* ✅ Track PageViews on client-side navigations */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
