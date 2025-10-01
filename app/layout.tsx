@@ -2,6 +2,8 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
+import PixelRouteTracker from "./components/PixelRouteTracker";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "HirePro Starter",
@@ -12,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel base code (hardcoded ID + fires PageView) */}
+        {/* INIT ONLY (no PageView here) */}
         <Script
           id="meta-pixel"
           strategy="afterInteractive"
@@ -27,7 +29,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               s.parentNode.insertBefore(t,s)}(window, document,'script',
               'https://connect.facebook.net/en_US/fbevents.js');
               fbq('init', '1865880404348903');
-              fbq('track', 'PageView');
             `,
           }}
         />
@@ -35,7 +36,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
 
-        {/* noscript fallback */}
+        {/* Fire PageView on route changes (Suspense required for useSearchParams) */}
+        <Suspense>
+          <PixelRouteTracker />
+        </Suspense>
+
         <noscript>
           <img
             height="1"
