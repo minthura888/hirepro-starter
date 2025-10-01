@@ -1,8 +1,9 @@
 // app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
-import MetaPixel from "@/components/MetaPixel"; // this stays the same
-import PixelRouteTracker from "./components/PixelRouteTracker"; // <-- fixed path
+import MetaPixel from "@/components/MetaPixel";
+import PixelRouteTracker from "./components/PixelRouteTracker";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "HirePro Starter",
@@ -14,7 +15,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <MetaPixel />
-        <PixelRouteTracker />
+        {/* Next.js requires a suspense boundary around useSearchParams/usePathname */}
+        <Suspense fallback={null}>
+          <PixelRouteTracker />
+        </Suspense>
         {children}
       </body>
     </html>
