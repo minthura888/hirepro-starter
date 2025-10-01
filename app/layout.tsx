@@ -1,6 +1,4 @@
-// app/layout.tsx
-"use client";
-
+// app/layout.tsx  (SERVER component – no "use client")
 import "./globals.css";
 import Script from "next/script";
 import { Suspense } from "react";
@@ -35,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
 
-        {/* noscript fallback (doesn't double-fire when JS is enabled) */}
+        {/* noscript fallback */}
         <noscript>
           <img
             height="1"
@@ -48,7 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        {/* fires PageView on client-side route changes only (skips first load) */}
+        {/* Fires PageView on client-side route changes only (skips first load) */}
         <Suspense fallback={null}>
           <PixelRouteTracker />
         </Suspense>
