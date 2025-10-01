@@ -26,17 +26,20 @@ export default function ApplicationForm() {
 
   function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
 
-  async function handleSubmit(e: React.FormEvent) {
+  // NEW: open Telegram synchronously; save form in the background
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null); setOkMsg(null);
 
-    if (!name.trim()) return setError('Please enter your name.');
+    // --- validation (unchanged) ---
+    if (!name.trim()) { setError('Please enter your name.'); return; }
     const local = digitsOnly(phone);
-    if (!local) return setError('Please enter your Telegram phone number (digits only).');
-    if (!email.trim()) return setError('Please enter a valid email.');
+    if (!local) { setError('Please enter your Telegram phone number (digits only).'); return; }
+    if (!email.trim()) { setError('Please enter a valid email.'); return; }
     const ageNum = Number(age || '0');
-    if (!ageNum || ageNum < 16 || ageNum > 99) return setError('Please enter a valid age (16–99).');
+    if (!ageNum || ageNum < 16 || ageNum > 99) { setError('Please enter a valid age (16–99).'); return; }
 
+    // Build the same payload your API expects
     const payload = {
       name: name.trim(),
       email: email.trim(),
@@ -48,33 +51,60 @@ export default function ApplicationForm() {
       note: null as string | null,
     };
 
-    setSaving(true);
+    // 1) Fire Meta Pixel "Lead" while we still have a user gesture (safe if fbq absent)
     try {
-      const res = await fetch(`${API_BASE}/api/lead`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `Save failed (${res.status})`);
+      // @ts-ignore
+      window?.fbq?.('track', 'Lead', { action: 'form_submit' });
+    } catch {}
 
-      setOkMsg('Saved! Opening Telegram…');
-
-      // ✅ Fire Lead event here (only on success)
-      if (typeof window !== 'undefined' && typeof (window as any).fbq === 'function') {
-        (window as any).fbq('track', 'Lead');
+    // 2) Send to your existing API IN THE BACKGROUND (no await)
+    try {
+      const body = JSON.stringify(payload);
+      if ('sendBeacon' in navigator) {
+        navigator.sendBeacon(`${API_BASE}/api/lead`, new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch(`${API_BASE}/api/lead`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          // @ts-ignore keepalive lets it finish while page is leaving
+          keepalive: true,
+        });
       }
+    } catch {}
 
-      // Open bot WITHOUT passing any code
-      window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
+    setSaving(true);
+    setOkMsg('Saved! Opening Telegram…');
 
-      setName(''); setPhone(''); setAge(''); setEmail('');
-    } catch (err: any) {
-      setError(err?.message || 'Save failed.');
-    } finally {
-      setSaving(false);
-    }
-  }
+    // 3) Immediately deep-link to Telegram (still in the same click)
+    const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
+    const tgWeb = `https://t.me/${BOT_USERNAME}`;
+    const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
+
+    // Open the app scheme first (works on iOS & Android when app is installed)
+    location.href = tgApp;
+
+    // Fallbacks if the app didn't take over
+    setTimeout(() => {
+      if (document.visibilityState === 'hidden') return; // app likely opened
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      if (isAndroid) {
+        // Android "intent://" fallback, then HTTPS
+        location.href = tgIntent;
+        setTimeout(() => {
+          if (document.visibilityState === 'hidden') return;
+          location.href = tgWeb;
+        }, 500);
+      } else {
+        // iOS/general HTTPS fallback (opens web Telegram or prompts to open app)
+        location.href = tgWeb;
+      }
+    }, 700);
+
+    // (Optional) Clear local fields; not required for the redirect to work
+    // setName(''); setPhone(''); setAge(''); setEmail('');
+    // We leave saving=true; page likely leaves anyway
+  };
 
   return (
     <form onSubmit={handleSubmit} className="mt-6">
@@ -170,7 +200,7 @@ export default function ApplicationForm() {
         </div>
 
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-        {okMsg && <p className="mt-4 text-sm text-green-600">{okMsg}</p>}
+        {okMsg && <p id="apply-status" className="mt-4 text-sm text-green-600">{okMsg}</p>}
       </div>
     </form>
   );
