@@ -1,3 +1,4 @@
+// app/components/PixelRouteTracker.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -10,7 +11,6 @@ declare global {
   }
 }
 
-/** Fires exactly one PageView per unique URL (path + query). Skips first load. */
 export default function PixelRouteTracker() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -21,9 +21,9 @@ export default function PixelRouteTracker() {
     const q = searchParams?.toString();
     const url = q ? `${pathname}?${q}` : pathname;
 
-    // First render after load is already tracked by layout.tsx
+    // First render already tracked in layout.tsx
     if (!window.__MPX_LAST_URL__) {
-      window.__MPX_LAST_URL__ = url; // set baseline but do NOT fire
+      window.__MPX_LAST_URL__ = url;
       return;
     }
 
