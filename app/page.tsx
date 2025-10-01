@@ -1,20 +1,30 @@
-'use client';
+// app/page.tsx
+"use client";
 
-import React, { useState } from 'react';
-import Link from 'next/link';
+import React, { useState } from "react";
+import Link from "next/link";
 import {
-  ShieldCheck, Rocket, Star, Globe2, CheckCircle,
-  Smartphone, Monitor, IdCard, Users, Lightbulb, ChevronDown
-} from 'lucide-react';
-import ApplicationForm from './components/ApplicationForm'; // ← fixed relative import
+  ShieldCheck,
+  Rocket,
+  Star,
+  Globe2,
+  CheckCircle,
+  Smartphone,
+  Monitor,
+  IdCard,
+  Users,
+  Lightbulb,
+  ChevronDown,
+} from "lucide-react";
+import ApplicationForm from "./components/ApplicationForm"; // keep this path
 
 const categories = [
-  { name: 'Design', icon: <Star className="w-5 h-5" aria-hidden /> },
-  { name: 'Marketing', icon: <Rocket className="w-5 h-5" aria-hidden /> },
-  { name: 'Operations', icon: <Globe2 className="w-5 h-5" aria-hidden /> },
-  { name: 'Customer Support', icon: <ShieldCheck className="w-5 h-5" aria-hidden /> },
-  { name: 'Sales', icon: <Star className="w-5 h-5" aria-hidden /> },
-  { name: 'Content', icon: <Star className="w-5 h-5" aria-hidden /> },
+  { name: "Design", icon: <Star className="w-5 h-5" aria-hidden /> },
+  { name: "Marketing", icon: <Rocket className="w-5 h-5" aria-hidden /> },
+  { name: "Operations", icon: <Globe2 className="w-5 h-5" aria-hidden /> },
+  { name: "Customer Support", icon: <ShieldCheck className="w-5 h-5" aria-hidden /> },
+  { name: "Sales", icon: <Star className="w-5 h-5" aria-hidden /> },
+  { name: "Content", icon: <Star className="w-5 h-5" aria-hidden /> },
 ];
 
 export default function Page() {
@@ -81,7 +91,9 @@ export default function Page() {
                 key={c.name}
                 className="card-like px-3 py-3 text-left flex items-center gap-2 hover:shadow-card"
               >
-                <div className="w-8 h-8 rounded-xl bg-[var(--brand-muted)] text-[var(--brand)] flex items-center justify-center">{c.icon}</div>
+                <div className="w-8 h-8 rounded-xl bg-[var(--brand-muted)] text-[var(--brand)] flex items-center justify-center">
+                  {c.icon}
+                </div>
                 <span className="text-sm font-medium">{c.name}</span>
               </div>
             ))}
@@ -129,7 +141,7 @@ export default function Page() {
 
       {/* Dark promo + stats */}
       <section className="py-16">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">{/* ← mx-auto fixed */}
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div
             className="rounded-2xl p-8 sm:p-10 text-white"
             style={{ background: `linear-gradient(0deg, rgba(37,99,235,0.25), rgba(37,99,235,0.25)), #0f172a` }}
@@ -168,9 +180,9 @@ export default function Page() {
       <section id="why" className="py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-3 gap-6">
           {[
-            { icon: <ShieldCheck className="w-5 h-5" />, title: 'Trust & safety', desc: 'Milestone-based payouts and ID verification.' },
-            { icon: <Rocket className="w-5 h-5" />, title: 'Within 1–2 days', desc: 'Most applicants start within 1–2 days after submitting the form.' },
-            { icon: <Star className="w-5 h-5" />, title: 'Curated talent', desc: 'We vet skills, availability, and timezone fit.' },
+            { icon: <ShieldCheck className="w-5 h-5" />, title: "Trust & safety", desc: "Milestone-based payouts and ID verification." },
+            { icon: <Rocket className="w-5 h-5" />, title: "Within 1–2 days", desc: "Most applicants start within 1–2 days after submitting the form." },
+            { icon: <Star className="w-5 h-5" />, title: "Curated talent", desc: "We vet skills, availability, and timezone fit." },
           ].map((f) => (
             <div key={f.title} className="card-like p-6">
               <div className="w-10 h-10 rounded-xl mb-3 flex items-center justify-center bg-[var(--brand-muted)] text-[var(--brand)]">
@@ -207,9 +219,9 @@ export default function Page() {
             <div className="w-10 h-10 rounded-xl bg-[var(--brand)] text-white flex items-center justify-center font-bold mb-3">HP</div>
             <p>HirePro helps teams find reliable part-time talent worldwide.</p>
           </div>
-          <Column title="Company" items={['About', 'Careers', 'Blog']} />
-          <Column title="Support" items={['Help Center', 'Safety', 'Contact']} />
-          <Column title="Legal" items={['Terms', 'Privacy', 'Cookies']} />
+          <Column title="Company" items={["About", "Careers", "Blog"]} />
+          <Column title="Support" items={["Help Center", "Safety", "Contact"]} />
+          <Column title="Legal" items={["Terms", "Privacy", "Cookies"]} />
         </div>
         <div className="text-xs text-slate-400 text-center mt-6">
           © {new Date().getFullYear()} HirePro, Inc. All rights reserved.
@@ -263,7 +275,9 @@ function Column({ title, items }: { title: string; items: string[] }) {
       <p className="font-semibold text-slate-900 mb-2">{title}</p>
       <ul className="space-y-1">
         {items.map((t) => (
-          <li key={t}><a className="hover:underline" href="#">{t}</a></li>
+          <li key={t}>
+            <a className="hover:underline" href="#">{t}</a>
+          </li>
         ))}
       </ul>
     </div>
@@ -272,11 +286,11 @@ function Column({ title, items }: { title: string; items: string[] }) {
 
 function FAQSection() {
   const items = [
-    { q: 'Who can apply?', a: 'Anyone 23+, male or female, with a smartphone and internet connection.' },
-    { q: 'Is this remote?', a: 'Yes — fully remote. You can work from anywhere.' },
-    { q: 'How do I apply?', a: 'Fill the Application Form and submit. A recruiter will contact you on Telegram.' },
-    { q: 'How fast can I start?', a: 'Most applicants start within 1–2 days after submitting the form.' },
-    { q: 'How many hours per day?', a: 'Typically 1–3 hours per day. Flexible schedule.' },
+    { q: "Who can apply?", a: "Anyone 23+, male or female, with a smartphone and internet connection." },
+    { q: "Is this remote?", a: "Yes — fully remote. You can work from anywhere." },
+    { q: "How do I apply?", a: "Fill the Application Form and submit. A recruiter will contact you on Telegram." },
+    { q: "How fast can I start?", a: "Most applicants start within 1–2 days after submitting the form." },
+    { q: "How many hours per day?", a: "Typically 1–3 hours per day. Flexible schedule." },
   ];
   return (
     <section id="faq" className="py-16">
@@ -293,10 +307,10 @@ function FAQSection() {
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`card-like ${open ? 'ring-2 ring-[var(--brand)]' : ''}`}>
+    <div className={`card-like ${open ? "ring-2 ring-[var(--brand)]" : ""}`}>
       <button className="w-full flex items-center justify-between text-left p-4 sm:p-5" onClick={() => setOpen(!open)}>
         <span className="font-semibold">{q}</span>
-        <ChevronDown className={`w-5 h-5 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-5 h-5 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="px-4 sm:px-5 pb-5 pt-0 text-slate-600 border-t border-slate-100">
