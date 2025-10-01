@@ -1,4 +1,3 @@
-// app/components/PixelRouteTracker.tsx
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -10,19 +9,19 @@ declare global {
   }
 }
 
-/** Fires PageView on client-side navigations only (skips first load). */
 export default function PixelRouteTracker() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isFirstLoad = useRef(true);
+  const first = useRef(true);
 
   useEffect(() => {
-    if (isFirstLoad.current) {
-      isFirstLoad.current = false; // first load already tracked in layout
+    if (first.current) {
+      first.current = false; // already tracked on first load by layout
       return;
     }
     if (typeof window !== "undefined" && typeof window.fbq === "function") {
       window.fbq("track", "PageView");
+      // console.log('[Pixel] route change PageView');
     }
   }, [pathname, searchParams]);
 
