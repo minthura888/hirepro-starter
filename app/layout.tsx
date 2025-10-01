@@ -2,9 +2,8 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
-import PixelRouteTracker from "./_components/PixelRouteTracker";
+import PixelRouteTracker from "./components/PixelRouteTracker";
 
-// Use env var if present, otherwise fall back to your agency's ID
 const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "1865880404348903";
 
 export const metadata: Metadata = {
@@ -16,7 +15,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel Base Code */}
         {PIXEL_ID ? (
           <Script
             id="meta-pixel"
@@ -40,10 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        {/* Track PageView on client-side route changes */}
         <PixelRouteTracker />
-
-        {/* noscript fallback */}
         <noscript>
           {PIXEL_ID ? (
             <img
