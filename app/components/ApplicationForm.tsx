@@ -1,15 +1,8 @@
-// app/components/ApplicationForm.tsx
 "use client";
 
 import React, { useState } from "react";
 
-// 👇 Your Google Apps Script Web App URL
-const SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbyKBHFXnNK_PyC5xpLVKpOldAcj6nayN32pybdrs4iPv2-192IiyIFpsiukU6qVZzFEdQ/exec";
-
-// 👇 Telegram bot username (falls back if env not set)
-const BOT_USERNAME =
-  process.env.NEXT_PUBLIC_BOT_USERNAME || "applyyourjob_bot";
+const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || "applyyourjob_bot";
 
 type Gender = "male" | "female";
 
@@ -33,78 +26,38 @@ export default function ApplicationForm() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const digitsOnly = (v: string) => v.replace(/\D+/g, "");
-  const generateWorkCode = () =>
-    "WC-" + Math.random().toString(36).slice(2, 11).toUpperCase();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setOkMsg(null);
 
-    // basic validation
     if (!name.trim()) return setError("Please enter your name.");
     const local = digitsOnly(phone);
     if (!local) return setError("Please enter your Telegram phone number (digits only).");
     if (!email.trim()) return setError("Please enter a valid email.");
     const ageNum = Number(age || "0");
-    if (!ageNum || ageNum < 16 || ageNum > 99)
-      return setError("Please enter a valid age (16–99).");
-
-    const e164Phone = `${selectedCountry.dial}${local}`;
-    const workCode = generateWorkCode();
+    if (!ageNum || ageNum < 16 || ageNum > 99) return setError("Please enter a valid age (16–99).");
 
     setSaving(true);
     try {
-      // fetch IP (best-effort)
-      let ipAddress = "unknown";
-      try {
-        const ipRes = await fetch("https://api.ipify.org?format=json");
-        const ipData = await ipRes.json();
-        if (ipData?.ip) ipAddress = ipData.ip;
-      } catch {
-        // ignore
-      }
-
-      // payload to Google Sheet
-      const payload = {
-        name: name.trim(),
-        email: email.trim(),
-        countryIso: selectedCountry.iso,
-        phone: e164Phone,
-        gender,
-        age: ageNum,
-        workCode,
-        ipAddress,
-      };
-
-      const res = await fetch(SHEET_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || `Save failed (${res.status})`);
-      }
-
-      setOkMsg("Saved! Opening Telegram…");
-
-      // Meta Pixel: Lead
+      // Fire Meta Pixel Lead (no payload required, but we can send small hints)
       if (typeof window !== "undefined" && typeof (window as any).fbq === "function") {
-        (window as any).fbq("track", "Lead", { workCode, ipAddress });
+        (window as any).fbq("track", "Lead", {
+          country: selectedCountry.iso,
+        });
       }
 
-      // open Telegram
+      setOkMsg("Opening Telegram…");
       window.open(`https://t.me/${BOT_USERNAME}`, "_blank");
 
-      // reset form
+      // Reset
       setName("");
       setPhone("");
       setAge("");
       setEmail("");
     } catch (err: any) {
-      setError(err?.message || "Save failed.");
+      setError(err?.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -169,21 +122,11 @@ export default function ApplicationForm() {
           <label className="block text-sm font-medium text-slate-700">* Gender</label>
           <div className="mt-2 flex items-center gap-6">
             <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="gender"
-                checked={gender === "male"}
-                onChange={() => setGender("male")}
-              />
+              <input type="radio" name="gender" checked={gender === "male"} onChange={() => setGender("male")} />
               Male
             </label>
             <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="gender"
-                checked={gender === "female"}
-                onChange={() => setGender("female")}
-              />
+              <input type="radio" name="gender" checked={gender === "female"} onChange={() => setGender("female")} />
               Female
             </label>
           </div>
@@ -222,7 +165,7 @@ export default function ApplicationForm() {
             disabled={saving}
             className="w-full md:w-auto h-12 px-6 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:opacity-60"
           >
-            {saving ? "Saving…" : "Send to Telegram"}
+            {saving ? "Processing…" : "Send to Telegram"}
           </button>
         </div>
 
