@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import PixelRouteTracker from "./components/PixelRouteTracker";
+import { Suspense } from "react";            // ← add this
 
 const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "1865880404348903";
 
@@ -38,7 +39,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        <PixelRouteTracker />
+        {/* Wrap the tracker in Suspense to satisfy Next.js */}
+        <Suspense>
+          <PixelRouteTracker />
+        </Suspense>
+
         <noscript>
           {PIXEL_ID ? (
             <img
