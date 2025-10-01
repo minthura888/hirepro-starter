@@ -37,7 +37,6 @@ export default function MetaPixel() {
         `}
       </Script>
 
-      {/* noscript fallback */}
       <noscript>
         <img
           height="1"
