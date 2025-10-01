@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
@@ -13,6 +13,8 @@ const COUNTRIES = [
   { iso: 'gb', name: 'United Kingdom', dial: '+44' },
 ];
 
+function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
+
 export default function ApplicationForm() {
   const [name, setName] = useState('');
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // +91 default
@@ -24,40 +26,44 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  function digitsOnly(v: string) { return v.replace(/\D+/g, ''); }
+  // Build E.164 like +<dialDigits><localDigits>
+  const phoneE164 = useMemo(() => {
+    const cc = digitsOnly(selectedCountry.dial);
+    const local = digitsOnly(phone);
+    if (!cc || !local) return '';
+    return `+${cc}${local}`;
+  }, [selectedCountry, phone]);
 
-  // NEW: open Telegram synchronously; save form in the background
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null); setOkMsg(null);
 
-    // --- validation (unchanged) ---
+    // Basic validation
     if (!name.trim()) { setError('Please enter your name.'); return; }
-    const local = digitsOnly(phone);
-    if (!local) { setError('Please enter your Telegram phone number (digits only).'); return; }
     if (!email.trim()) { setError('Please enter a valid email.'); return; }
     const ageNum = Number(age || '0');
     if (!ageNum || ageNum < 16 || ageNum > 99) { setError('Please enter a valid age (16–99).'); return; }
+    if (!phoneE164) { setError('Please enter your Telegram phone number.'); return; }
 
-    // Build the same payload your API expects
     const payload = {
       name: name.trim(),
       email: email.trim(),
       countryIso: selectedCountry.iso,
-      dial: selectedCountry.dial,
-      phone: local,
+      dial: selectedCountry.dial, // keep existing fields for your API
+      phone: digitsOnly(phone),   // digits only
+      phoneE164,                  // NEW: canonical phone, reduces mismatches
       gender,
       age: ageNum,
       note: null as string | null,
     };
 
-    // 1) Fire Meta Pixel "Lead" while we still have a user gesture (safe if fbq absent)
+    // Fire Meta Pixel "Lead" while still in user gesture (optional, safe)
     try {
       // @ts-ignore
       window?.fbq?.('track', 'Lead', { action: 'form_submit' });
     } catch {}
 
-    // 2) Send to your existing API IN THE BACKGROUND (no await)
+    // Send to your API in the background (do NOT await)
     try {
       const body = JSON.stringify(payload);
       if ('sendBeacon' in navigator) {
@@ -67,7 +73,7 @@ export default function ApplicationForm() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body,
-          // @ts-ignore keepalive lets it finish while page is leaving
+          // @ts-ignore
           keepalive: true,
         });
       }
@@ -76,34 +82,26 @@ export default function ApplicationForm() {
     setSaving(true);
     setOkMsg('Saved! Opening Telegram…');
 
-    // 3) Immediately deep-link to Telegram (still in the same click)
+    // Deep-link to Telegram immediately (same tap)
     const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
     const tgWeb = `https://t.me/${BOT_USERNAME}`;
     const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
 
-    // Open the app scheme first (works on iOS & Android when app is installed)
     location.href = tgApp;
 
-    // Fallbacks if the app didn't take over
     setTimeout(() => {
       if (document.visibilityState === 'hidden') return; // app likely opened
       const isAndroid = /Android/i.test(navigator.userAgent);
       if (isAndroid) {
-        // Android "intent://" fallback, then HTTPS
         location.href = tgIntent;
         setTimeout(() => {
           if (document.visibilityState === 'hidden') return;
           location.href = tgWeb;
         }, 500);
       } else {
-        // iOS/general HTTPS fallback (opens web Telegram or prompts to open app)
         location.href = tgWeb;
       }
     }, 700);
-
-    // (Optional) Clear local fields; not required for the redirect to work
-    // setName(''); setPhone(''); setAge(''); setEmail('');
-    // We leave saving=true; page likely leaves anyway
   };
 
   return (
@@ -123,7 +121,7 @@ export default function ApplicationForm() {
           />
         </div>
 
-        {/* Phone (3:7 grid) */}
+        {/* Phone */}
         <div className="mt-6">
           <label className="block text-sm font-medium text-slate-700">* Telegram phone number</label>
           <div className="mt-2 grid grid-cols-10 gap-3">
@@ -131,9 +129,7 @@ export default function ApplicationForm() {
               <select
                 value={selectedCountry.iso}
                 onChange={(e) =>
-                  setSelectedCountry(
-                    COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0]
-                  )
+                  setSelectedCountry(COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0])
                 }
                 className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
               >
@@ -153,7 +149,9 @@ export default function ApplicationForm() {
               />
             </div>
           </div>
-          <p className="mt-1 text-xs text-slate-500">Enter digits only. We’ll combine it with the country code.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            We will verify this exact number with Telegram: <strong>{phoneE164 || '—'}</strong>
+          </p>
         </div>
 
         {/* Gender */}
@@ -173,13 +171,13 @@ export default function ApplicationForm() {
 
         {/* Age */}
         <div className="mt-6">
-          <label className="block text-sm font-medium text-slate-700">* Age</label>
-          <input
-            type="number" min={16} max={99}
-            value={age} onChange={(e) => setAge(e.target.value)}
-            placeholder="Please enter your age"
-            className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
-          />
+            <label className="block text-sm font-medium text-slate-700">* Age</label>
+            <input
+              type="number" min={16} max={99}
+              value={age} onChange={(e) => setAge(e.target.value)}
+              placeholder="Please enter your age"
+              className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+            />
         </div>
 
         {/* Email */}
