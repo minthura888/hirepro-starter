@@ -3,8 +3,9 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import PixelRouteTracker from "./components/PixelRouteTracker";
-import { Suspense } from "react";            // ← add this
+import { Suspense } from "react";
 
+// Use env var if present, otherwise fall back to your ID
 const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "1865880404348903";
 
 export const metadata: Metadata = {
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* Meta Pixel base code: INIT ONLY (no PageView here) */}
         {PIXEL_ID ? (
           <Script
             id="meta-pixel"
@@ -31,7 +33,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 s.parentNode.insertBefore(t,s)}(window, document,'script',
                 'https://connect.facebook.net/en_US/fbevents.js');
                 fbq('init', '${PIXEL_ID}');
-                fbq('track', 'PageView');
               `,
             }}
           />
@@ -39,11 +40,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        {/* Wrap the tracker in Suspense to satisfy Next.js */}
+
+        {/* Fire PageView on first load + each route change */}
         <Suspense>
           <PixelRouteTracker />
         </Suspense>
 
+        {/* noscript fallback */}
         <noscript>
           {PIXEL_ID ? (
             <img
