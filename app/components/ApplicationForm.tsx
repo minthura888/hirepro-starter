@@ -60,6 +60,11 @@ export default function ApplicationForm() {
 
       setOkMsg('Saved! Opening Telegram…');
 
+      // ✅ Fire Lead event here (only on success)
+      if (typeof window !== 'undefined' && typeof (window as any).fbq === 'function') {
+        (window as any).fbq('track', 'Lead');
+      }
+
       // Open bot WITHOUT passing any code
       window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
 
