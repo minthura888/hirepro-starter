@@ -10,6 +10,7 @@ declare global {
   }
 }
 
+/** Fires PageView on client-side navigations only (skips first load). */
 export default function PixelRouteTracker() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -17,8 +18,7 @@ export default function PixelRouteTracker() {
 
   useEffect(() => {
     if (isFirstLoad.current) {
-      // already tracked by layout.tsx
-      isFirstLoad.current = false;
+      isFirstLoad.current = false; // first load already tracked in layout
       return;
     }
     if (typeof window !== "undefined" && typeof window.fbq === "function") {
