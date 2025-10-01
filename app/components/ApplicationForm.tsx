@@ -1,3 +1,4 @@
+// app/components/ApplicationForm.tsx
 "use client";
 
 import React, { useState } from "react";
@@ -37,26 +38,32 @@ export default function ApplicationForm() {
     if (!local) return setError("Please enter your Telegram phone number (digits only).");
     if (!email.trim()) return setError("Please enter a valid email.");
     const ageNum = Number(age || "0");
-    if (!ageNum || ageNum < 16 || ageNum > 99) return setError("Please enter a valid age (16–99).");
+    if (!ageNum || ageNum < 16 || ageNum > 99)
+      return setError("Please enter a valid age (16–99).");
 
     setSaving(true);
 
-    // Fire Meta Pixel Lead immediately (no awaits)
+    // Fire Meta Pixel Lead immediately (no await)
     try {
       if (typeof window !== "undefined" && typeof (window as any).fbq === "function") {
-        (window as any).fbq("track", "Lead", { country: selectedCountry.iso });
+        (window as any).fbq("track", "Lead", {
+          country: selectedCountry.iso,
+        });
       }
-    } catch {}
+    } catch {
+      // ignore analytics errors
+    }
 
+    // Give the pixel a short moment to flush, then navigate to Telegram
     setOkMsg("Opening Telegram…");
+    const url = `https://t.me/${BOT_USERNAME}`;
+    setTimeout(() => {
+      window.location.href = url; // same-tab navigation (most reliable)
+      // If you prefer new tab instead:
+      // window.open(url, "_blank", "noopener,noreferrer");
+    }, 400);
 
-    // Open Telegram in SAME tab to avoid popup blockers
-    window.location.href = `https://t.me/${BOT_USERNAME}`;
-
-    // If you prefer a new tab instead, use:
-    // window.open(`https://t.me/${BOT_USERNAME}`, "_blank", "noopener,noreferrer");
-
-    // Reset (not really necessary since we're navigating away)
+    // No need to reset state since we navigate away, but do clear saving flag
     setSaving(false);
   }
 
@@ -87,9 +94,7 @@ export default function ApplicationForm() {
               <select
                 value={selectedCountry.iso}
                 onChange={(e) =>
-                  setSelectedCountry(
-                    COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0]
-                  )
+                  setSelectedCountry(COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0])
                 }
                 className="w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-blue-100"
               >
@@ -119,11 +124,21 @@ export default function ApplicationForm() {
           <label className="block text-sm font-medium text-slate-700">* Gender</label>
           <div className="mt-2 flex items-center gap-6">
             <label className="inline-flex items-center gap-2">
-              <input type="radio" name="gender" checked={gender === "male"} onChange={() => setGender("male")} />
+              <input
+                type="radio"
+                name="gender"
+                checked={gender === "male"}
+                onChange={() => setGender("male")}
+              />
               Male
             </label>
             <label className="inline-flex items-center gap-2">
-              <input type="radio" name="gender" checked={gender === "female"} onChange={() => setGender("female")} />
+              <input
+                type="radio"
+                name="gender"
+                checked={gender === "female"}
+                onChange={() => setGender("female")}
+              />
               Female
             </label>
           </div>
