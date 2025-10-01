@@ -33,7 +33,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               }}
             />
             <noscript>
-              {/* this 1x1 pixel is recommended by Meta */}
               <img
                 height="1"
                 width="1"
