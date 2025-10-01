@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { fbqTrack } from '@/lib/pixel';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
@@ -26,7 +27,7 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
-  // Build E.164 like +<dialDigits><localDigits>
+  // Build canonical E.164 (what your bot sees): +<country><digits>
   const phoneE164 = useMemo(() => {
     const cc = digitsOnly(selectedCountry.dial);
     const local = digitsOnly(phone);
@@ -36,7 +37,8 @@ export default function ApplicationForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null); setOkMsg(null);
+    setError(null);
+    setOkMsg(null);
 
     // Basic validation
     if (!name.trim()) { setError('Please enter your name.'); return; }
@@ -45,25 +47,25 @@ export default function ApplicationForm() {
     if (!ageNum || ageNum < 16 || ageNum > 99) { setError('Please enter a valid age (16–99).'); return; }
     if (!phoneE164) { setError('Please enter your Telegram phone number.'); return; }
 
+    // what your API already expects, plus phoneE164
     const payload = {
       name: name.trim(),
       email: email.trim(),
       countryIso: selectedCountry.iso,
-      dial: selectedCountry.dial, // keep existing fields for your API
-      phone: digitsOnly(phone),   // digits only
-      phoneE164,                  // NEW: canonical phone, reduces mismatches
+      dial: selectedCountry.dial,
+      phone: digitsOnly(phone), // old field
+      phoneE164,                // NEW: canonical — ask your bot/backend to compare this
       gender,
       age: ageNum,
       note: null as string | null,
     };
 
-    // Fire Meta Pixel "Lead" while still in user gesture (optional, safe)
-    try {
-      // @ts-ignore
-      window?.fbq?.('track', 'Lead', { action: 'form_submit' });
-    } catch {}
+    // 1) Fire Lead now; small delay lets pixel send before deep-link
+    try { fbqTrack('Lead', { action: 'form_submit' }); } catch {}
+    setSaving(true);
+    setOkMsg('Saved! Opening Telegram…');
 
-    // Send to your API in the background (do NOT await)
+    // 2) send form in the background (do NOT await)
     try {
       const body = JSON.stringify(payload);
       if ('sendBeacon' in navigator) {
@@ -79,29 +81,30 @@ export default function ApplicationForm() {
       }
     } catch {}
 
-    setSaving(true);
-    setOkMsg('Saved! Opening Telegram…');
-
-    // Deep-link to Telegram immediately (same tap)
+    // 3) After ~120ms (enough for pixel), open Telegram (still reliable)
     const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
     const tgWeb = `https://t.me/${BOT_USERNAME}`;
     const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
 
-    location.href = tgApp;
-
     setTimeout(() => {
-      if (document.visibilityState === 'hidden') return; // app likely opened
-      const isAndroid = /Android/i.test(navigator.userAgent);
-      if (isAndroid) {
-        location.href = tgIntent;
-        setTimeout(() => {
-          if (document.visibilityState === 'hidden') return;
+      // open app scheme first
+      location.href = tgApp;
+
+      // fallbacks
+      setTimeout(() => {
+        if (document.visibilityState === 'hidden') return; // app likely opened
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        if (isAndroid) {
+          location.href = tgIntent;
+          setTimeout(() => {
+            if (document.visibilityState === 'hidden') return;
+            location.href = tgWeb;
+          }, 500);
+        } else {
           location.href = tgWeb;
-        }, 500);
-      } else {
-        location.href = tgWeb;
-      }
-    }, 700);
+        }
+      }, 700);
+    }, 120);
   };
 
   return (
@@ -171,13 +174,13 @@ export default function ApplicationForm() {
 
         {/* Age */}
         <div className="mt-6">
-            <label className="block text-sm font-medium text-slate-700">* Age</label>
-            <input
-              type="number" min={16} max={99}
-              value={age} onChange={(e) => setAge(e.target.value)}
-              placeholder="Please enter your age"
-              className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
-            />
+          <label className="block text-sm font-medium text-slate-700">* Age</label>
+          <input
+            type="number" min={16} max={99}
+            value={age} onChange={(e) => setAge(e.target.value)}
+            placeholder="Please enter your age"
+            className="mt-2 w-full h-12 rounded-xl border border-slate-300 bg-white px-3 focus:outline-none focus:ring-4 focus:ring-[var(--brand-muted)]"
+          />
         </div>
 
         {/* Email */}
