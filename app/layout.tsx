@@ -10,7 +10,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Meta Pixel: load once, init once, fire ONE PageView on first load */}
+        {/* Meta Pixel: load once, init once, and fire ONE PageView on first load */}
         <Script id="fb-pixel-init" strategy="afterInteractive">
           {`
             (function () {
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
 
-        {/* noscript fallback (safe; won't double-fire with JS) */}
+        {/* noscript fallback */}
         <noscript>
           <img
             height="1"
@@ -44,7 +44,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           />
         </noscript>
       </head>
-
       <body>
         {children}
         {/* Fire PageView on client-side route changes only (skips first load) */}
