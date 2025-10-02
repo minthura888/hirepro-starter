@@ -4,7 +4,6 @@ import Database from "better-sqlite3";
 const DB_PATH = process.env.DATABASE_PATH || "/tmp/app.db";
 const db = new Database(DB_PATH);
 
-// Create table once
 db.exec(`
   CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,27 +41,23 @@ export type LeadRow = {
 };
 
 function newWorkCode(len = 7): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoid 0/O/1/I
   let out = "";
-  for (let i = 0; i < len; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
 }
 
 /** Return row by E.164 (or null). */
 export function getByE164(e164: string): LeadRow | null {
-  const stmt = db.prepare<[{ e: string }], LeadRow>(
-    "SELECT * FROM leads WHERE phone_e164 = ? LIMIT 1"
-  );
-  return stmt.get(e164) ?? null;
+  const stmt = db.prepare("SELECT * FROM leads WHERE phone_e164 = ? LIMIT 1");
+  const row = stmt.get(e164);
+  return (row as LeadRow) ?? null;
 }
 
 /** Upsert by E.164. Do NOT regenerate work_code if a row exists. */
 export function upsertLead(input: LeadInput): LeadRow {
   const existing = getByE164(input.phone_e164);
   if (existing) {
-    // Update non-unique fields (optional)
     const upd = db.prepare(`
       UPDATE leads
       SET name = COALESCE(?, name),
