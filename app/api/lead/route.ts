@@ -1,77 +1,49 @@
 // app/api/lead/route.ts
-import Database from "better-sqlite3";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { upsertLead } from "@/lib/db";
+import { toE164 } from "@/lib/phone";
 
-function getDb() {
-  const path = process.env.DATABASE_PATH || "/tmp/app.db";
-  const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  // Create table if missing (runs every request; cheap & safe)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS leads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      email TEXT,
-      phone_e164 TEXT UNIQUE,
-      gender TEXT,
-      age INTEGER,
-      work_code TEXT,
-      ip TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  return db;
-}
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-function randomCode(len = 8) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      name,
-      email,
-      gender,
-      age,
-      countryIso,
-      phone,       // raw
-      phoneE164,   // like "+918610080339"
-      note,
-    } = body || {};
+    const { name, email, gender, age, note, phone, countryIso } = body || {};
 
-    // basic validation
-    if (!phoneE164 || !email || !name) {
-      return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
+    const e164 = toE164(String(phone || ""), String(countryIso || undefined));
+    if (!e164) {
+      return NextResponse.json({ ok: false, error: "Invalid phone number" }, { status: 400 });
     }
 
-    const db = getDb();
+    const ip =
+      (req.headers.get("x-real-ip") ||
+        req.headers.get("x-forwarded-for") ||
+        "")?.split(",")[0].trim();
 
-    // find existing
-    let row = db.prepare(`SELECT * FROM leads WHERE phone_e164 = ?`).get(phoneE164) as any;
+    const row = upsertLead({
+      name: name || null,
+      email: email || null,
+      phone_e164: e164,
+      gender: gender || null,
+      age: age ? Number(age) : undefined,
+      note: note || null,
+      ip,
+    });
 
-    if (!row) {
-      const workCode = randomCode(7);
-      const ip = (req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "").split(",")[0].trim();
-
-      db.prepare(
-        `INSERT INTO leads (name,email,phone_e164,gender,age,work_code,ip)
-         VALUES (?,?,?,?,?,?,?)`
-      ).run(name, email, phoneE164, gender ?? null, Number(age) || null, workCode, ip);
-
-      row = db.prepare(`SELECT * FROM leads WHERE phone_e164 = ?`).get(phoneE164);
-    } else if (!row.work_code) {
-      // ensure code exists for older rows
-      const workCode = randomCode(7);
-      db.prepare(`UPDATE leads SET work_code=? WHERE id=?`).run(workCode, row.id);
-      row = db.prepare(`SELECT * FROM leads WHERE id=?`).get(row.id);
-    }
-
-    return NextResponse.json({ ok: true, row });
+    return NextResponse.json({
+      ok: true,
+      row: {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        phone_e164: row.phone_e164,
+        gender: row.gender,
+        age: row.age,
+        work_code: row.work_code,
+        created_at: row.created_at,
+      },
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
