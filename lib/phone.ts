@@ -1,25 +1,9 @@
-import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
-export function digitsOnly(s: string): string {
-  return (s || '').replace(/\D/g, '');
-}
-
-export function toE164(countryOrNumber: string, input?: string): string | null {
-  const raw = input ?? countryOrNumber;
-  try {
-    const p = parsePhoneNumberFromString(raw || '');
-    if (p && p.isValid()) return p.number;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** forgiving: exact digits OR last 10 digits equal */
-export function phonesMatch(a: string, b: string): boolean {
-  const da = digitsOnly(a);
-  const db = digitsOnly(b);
-  if (!da || !db) return false;
-  if (da === db) return true;
-  return da.slice(-10) === db.slice(-10);
+export function toE164(raw: string, countryIso?: string): string | null {
+  // Accept “8610080339”, “+91 861 008 0339”, etc.
+  const s = (raw || '').replace(/[^\d+]/g, '');
+  let pn = parsePhoneNumberFromString(s, countryIso?.toUpperCase());
+  if (!pn || !pn.isValid()) return null;
+  return pn.number; // E.164 like “+918610080339”
 }
