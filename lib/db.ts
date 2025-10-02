@@ -2,94 +2,100 @@
 import Database from "better-sqlite3";
 
 const DB_PATH = process.env.DATABASE_PATH || "/tmp/app.db";
-export const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
+const db = new Database(DB_PATH);
 
-// Ensure the leads table & indexes exist
+// Create table once
 db.exec(`
-CREATE TABLE IF NOT EXISTS leads (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  name         TEXT,
-  email        TEXT,
-  phone_e164   TEXT NOT NULL UNIQUE,
-  gender       TEXT,
-  age          INTEGER,
-  note         TEXT,
-  work_code    TEXT UNIQUE,
-  code_sent    INTEGER NOT NULL DEFAULT 0,
-  tg_user_id   INTEGER,
-  ip           TEXT,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_phone ON leads(phone_e164);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_code  ON leads(work_code);
+  CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    email TEXT,
+    phone_e164 TEXT UNIQUE,
+    gender TEXT,
+    age INTEGER,
+    work_code TEXT,
+    ip TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_leads_phone_e164 ON leads(phone_e164);
 `);
 
-// Soft migrations in case columns are missing (safe if already exist)
-try { db.exec(`ALTER TABLE leads ADD COLUMN code_sent INTEGER NOT NULL DEFAULT 0;`); } catch {}
-try { db.exec(`ALTER TABLE leads ADD COLUMN tg_user_id INTEGER;`); } catch {}
-try { db.exec(`ALTER TABLE leads ADD COLUMN work_code TEXT;`); } catch {}
-try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_phone ON leads(phone_e164);`); } catch {}
-try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_leads_code  ON leads(work_code);`); } catch {}
+export type LeadInput = {
+  name?: string | null;
+  email?: string | null;
+  phone_e164: string;
+  gender?: string | null;
+  age?: number | null;
+  ip?: string | null;
+};
 
-function genCode(len = 8) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoid 0/O/I/1
-  let s = "";
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-function generateUniqueCode(): string {
-  let code = genCode();
-  while (db.prepare(`SELECT 1 FROM leads WHERE work_code = ?`).get(code)) {
-    code = genCode();
+export type LeadRow = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  phone_e164: string;
+  gender: string | null;
+  age: number | null;
+  work_code: string;
+  ip: string | null;
+  created_at: string;
+};
+
+function newWorkCode(len = 7): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
-  return code;
+  return out;
 }
 
-/** Insert or update by phone_e164; guarantee one work_code per phone. */
-export function upsertLead(input: {
-  name?: string; email?: string; phone_e164: string;
-  gender?: string; age?: number; note?: string; ip?: string;
-}) {
-  const { name, email, phone_e164, gender, age, note, ip } = input;
+/** Return row by E.164 (or null). */
+export function getByE164(e164: string): LeadRow | null {
+  const stmt = db.prepare<[{ e: string }], LeadRow>(
+    "SELECT * FROM leads WHERE phone_e164 = ? LIMIT 1"
+  );
+  return stmt.get(e164) ?? null;
+}
 
-  const existing = db.prepare(`SELECT * FROM leads WHERE phone_e164 = ?`).get(phone_e164) as any | undefined;
+/** Upsert by E.164. Do NOT regenerate work_code if a row exists. */
+export function upsertLead(input: LeadInput): LeadRow {
+  const existing = getByE164(input.phone_e164);
   if (existing) {
-    if (!existing.work_code) {
-      const code = generateUniqueCode();
-      db.prepare(`UPDATE leads SET work_code=? WHERE id=?`).run(code, existing.id);
-    }
-    db.prepare(`
+    // Update non-unique fields (optional)
+    const upd = db.prepare(`
       UPDATE leads
-         SET name=COALESCE(?,name),
-             email=COALESCE(?,email),
-             gender=COALESCE(?,gender),
-             age=COALESCE(?,age),
-             note=COALESCE(?,note),
-             ip=COALESCE(?,ip)
-       WHERE id=?
-    `).run(name, email, gender, age, note, ip, existing.id);
-
-    return db.prepare(`SELECT * FROM leads WHERE id=?`).get(existing.id);
+      SET name = COALESCE(?, name),
+          email = COALESCE(?, email),
+          gender = COALESCE(?, gender),
+          age = COALESCE(?, age),
+          ip = COALESCE(?, ip)
+      WHERE phone_e164 = ?
+    `);
+    upd.run(
+      input.name ?? null,
+      input.email ?? null,
+      input.gender ?? null,
+      input.age ?? null,
+      input.ip ?? null,
+      input.phone_e164
+    );
+    return getByE164(input.phone_e164)!;
   }
 
-  const code = generateUniqueCode();
-  db.prepare(`
-    INSERT INTO leads (name,email,phone_e164,gender,age,note,work_code,ip,code_sent)
-    VALUES (?,?,?,?,?,?,?,?,0)
-  `).run(name ?? null, email ?? null, phone_e164, gender ?? null, age ?? null, note ?? null, code, ip ?? null);
-
-  return db.prepare(`SELECT * FROM leads WHERE phone_e164 = ?`).get(phone_e164);
-}
-
-export function findLeadByE164(e164: string) {
-  return db.prepare(`SELECT * FROM leads WHERE phone_e164 = ?`).get(e164) as any | undefined;
-}
-
-export function listLeads(limit = 100) {
-  return db.prepare(`SELECT * FROM leads ORDER BY id DESC LIMIT ?`).all(limit);
-}
-
-export function markCodeSent(e164: string, tgUserId: number) {
-  db.prepare(`UPDATE leads SET code_sent=1, tg_user_id=? WHERE phone_e164=?`).run(tgUserId, e164);
+  const work_code = newWorkCode();
+  const ins = db.prepare(`
+    INSERT INTO leads (name, email, phone_e164, gender, age, work_code, ip)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  ins.run(
+    input.name ?? null,
+    input.email ?? null,
+    input.phone_e164,
+    input.gender ?? null,
+    input.age ?? null,
+    work_code,
+    input.ip ?? null
+  );
+  return getByE164(input.phone_e164)!;
 }
