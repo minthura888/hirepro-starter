@@ -1,23 +1,35 @@
 // app/api/lead/lookup/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { getByE164 } from "@/lib/db";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
-  const key = req.nextUrl.searchParams.get("key") || "";
-  const e164 = req.nextUrl.searchParams.get("e164") || "";
+const UPSTREAM = process.env.API_BASE?.replace(/\/+$/, "") 
+  || process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "")
+  || "https://api.hirepr0.com";
 
-  if (!key || key !== process.env.ADMIN_KEY) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+export async function OPTIONS() {
+  return new Response(null, { status: 204 });
+}
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    // forward all query params (e.g. ?e164=...&key=...)
+    const upstreamUrl = `${UPSTREAM}/api/lead/lookup${url.search}`;
+
+    const upstreamRes = await fetch(upstreamUrl, { method: "GET" });
+    const text = await upstreamRes.text();
+
+    return new Response(text, {
+      status: upstreamRes.status,
+      headers: {
+        "content-type":
+          upstreamRes.headers.get("content-type") || "application/json",
+      },
+    });
+  } catch (err: any) {
+    return new Response(
+      JSON.stringify({ ok: false, error: err?.message || "Proxy error" }),
+      { status: 502, headers: { "content-type": "application/json" } }
+    );
   }
-  if (!e164) {
-    return NextResponse.json({ ok: false, error: "Missing e164" }, { status: 400 });
-  }
-
-  const row = getByE164(e164);
-  if (!row) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-
-  return NextResponse.json({ ok: true, row });
 }
