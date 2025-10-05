@@ -1,71 +1,56 @@
 // app/api/lead/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { toE164 } from "@/lib/phone";
-import { upsertLead } from "@/lib/db";
 
+// Keep node runtime (Edge can have fetch/body quirks for some backends)
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
+// Change this if your API domain ever changes
+const UPSTREAM = process.env.API_BASE?.replace(/\/+$/, "") 
+  || process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "")
+  || "https://api.hirepr0.com";
+
+// --- CORS preflight (browser will call OPTIONS before POST) ---
+export async function OPTIONS() {
+  // We don’t set CORS headers here because the request is same-origin
+  // (browser hits /api/lead on your own domain). Returning 204 is enough.
+  return new Response(null, { status: 204 });
+}
+
+// --- Forward POST to your real backend ---
+export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
+    // Forward the raw body so we don’t change the payload format
+    const body = await req.text();
 
-    const {
-      name = null,
-      email = null,
-      gender = null,
-      age = null,
-      countryIso,
-      phone,
-      phoneE164, // client may already send computed E.164
-      note,      // ignored but tolerated
-    } = body || {};
+    // Forward a minimal set of headers. Content-Type is important.
+    const headers: Record<string, string> = {};
+    const contentType = req.headers.get("content-type");
+    if (contentType) headers["content-type"] = contentType;
 
-    // Prefer client-provided E.164 if valid, else compute from raw + country
-    const e164 =
-      (typeof phoneE164 === "string" && phoneE164.startsWith("+") && phoneE164.length > 4
-        ? phoneE164
-        : toE164(String(phone ?? ""), countryIso)) || null;
+    // If you ever add auth to your backend, you can pass it through:
+    const auth = req.headers.get("authorization");
+    if (auth) headers["authorization"] = auth;
 
-    if (!e164) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid phone number" },
-        { status: 400 }
-      );
-    }
-
-    // Grab IP (works on Vercel)
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.ip ||
-      null;
-
-    const normalizedAge =
-      typeof age === "number"
-        ? age
-        : typeof age === "string"
-        ? Number(age)
-        : null;
-
-    const row = upsertLead({
-      name,
-      email,
-      phone_e164: e164,
-      gender,
-      age: Number.isFinite(normalizedAge) ? (normalizedAge as number) : null,
-      ip,
+    const upstreamRes = await fetch(`${UPSTREAM}/api/lead`, {
+      method: "POST",
+      headers,
+      body,
     });
 
-    return NextResponse.json({
-      ok: true,
-      e164: row.phone_e164,
-      work_code: row.work_code,
-      saved: true,
+    // Stream/return upstream response as-is
+    const text = await upstreamRes.text();
+
+    return new Response(text, {
+      status: upstreamRes.status,
+      headers: {
+        "content-type":
+          upstreamRes.headers.get("content-type") || "application/json",
+      },
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message || "Unknown error" },
-      { status: 500 }
+    return new Response(
+      JSON.stringify({ ok: false, error: err?.message || "Proxy error" }),
+      { status: 502, headers: { "content-type": "application/json" } }
     );
   }
 }
