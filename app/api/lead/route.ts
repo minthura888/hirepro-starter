@@ -1,56 +1,89 @@
-// app/api/lead/route.ts
+import { NextResponse } from "next/server";
+import Database from "better-sqlite3";
+import crypto from "crypto";
 
-// Keep node runtime (Edge can have fetch/body quirks for some backends)
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+const dbPath = process.env.DATABASE_PATH || "/var/lib/hirepro/app.db";
 
-// Change this if your API domain ever changes
-const UPSTREAM = process.env.API_BASE?.replace(/\/+$/, "") 
-  || process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "")
-  || "https://api.hirepr0.com";
-
-// --- CORS preflight (browser will call OPTIONS before POST) ---
-export async function OPTIONS() {
-  // We don’t set CORS headers here because the request is same-origin
-  // (browser hits /api/lead on your own domain). Returning 204 is enough.
-  return new Response(null, { status: 204 });
+// Get client IP from reverse proxy headers
+function getClientIp(req: Request) {
+  const xfwd = req.headers.get("x-forwarded-for");
+  if (xfwd) return xfwd.split(",")[0].trim();
+  return (
+    req.headers.get("x-real-ip") ||
+    req.headers.get("cf-connecting-ip") ||
+    req.headers.get("x-client-ip") ||
+    ""
+  );
 }
 
-// --- Forward POST to your real backend ---
+// (Optional) tiny migration to ensure 'ip' column exists
+function ensureIpColumn(db: Database.Database) {
+  const cols = db.prepare("PRAGMA table_info(leads)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "ip")) {
+    db.prepare("ALTER TABLE leads ADD COLUMN ip TEXT").run();
+  }
+}
+
+type LeadRow = { work_code?: string } | undefined;
+
 export async function POST(req: Request) {
   try {
-    // Forward the raw body so we don’t change the payload format
-    const body = await req.text();
+    const body = await req.json();
 
-    // Forward a minimal set of headers. Content-Type is important.
-    const headers: Record<string, string> = {};
-    const contentType = req.headers.get("content-type");
-    if (contentType) headers["content-type"] = contentType;
+    if (!body?.phoneE164) {
+      return NextResponse.json(
+        { ok: false, error: "Missing phone number" },
+        { status: 400 }
+      );
+    }
 
-    // If you ever add auth to your backend, you can pass it through:
-    const auth = req.headers.get("authorization");
-    if (auth) headers["authorization"] = auth;
+    const db = new Database(dbPath);
+    ensureIpColumn(db);
 
-    const upstreamRes = await fetch(`${UPSTREAM}/api/lead`, {
-      method: "POST",
-      headers,
-      body,
-    });
+    const ip = getClientIp(req);
 
-    // Stream/return upstream response as-is
-    const text = await upstreamRes.text();
+    // If this phone already has a code, reuse it
+    const existing = db
+      .prepare("SELECT work_code FROM leads WHERE phone_e164 = ?")
+      .get(body.phoneE164) as LeadRow;
 
-    return new Response(text, {
-      status: upstreamRes.status,
-      headers: {
-        "content-type":
-          upstreamRes.headers.get("content-type") || "application/json",
-      },
-    });
+    let workCode: string;
+
+    if (existing?.work_code) {
+      workCode = existing.work_code;
+    } else {
+      workCode = crypto.randomBytes(3).toString("hex").toUpperCase();
+
+      db.prepare(
+        `INSERT INTO leads
+         (phone_e164, work_code, name, email, gender, age, country_iso, dial, note, ip)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        body.phoneE164,
+        workCode,
+        body.name || "",
+        body.email || "",
+        body.gender || "",
+        Number(body.age) || 0,
+        body.countryIso || "",
+        body.dial || "",
+        body.note || "",
+        ip
+      );
+    }
+
+    db.close();
+    return NextResponse.json({ ok: true, workCode });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ ok: false, error: err?.message || "Proxy error" }),
-      { status: 502, headers: { "content-type": "application/json" } }
+    console.error("Lead insert error:", err);
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Server error" },
+      { status: 500 }
     );
   }
+}
+
+// CORS preflight (Nginx adds headers; 204 is enough)
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204 });
 }
