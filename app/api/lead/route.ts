@@ -1,89 +1,58 @@
-import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import crypto from "crypto";
+// app/api/lead/route.ts  (FRONTEND / VERCEL PROXY)
+// This file runs on Vercel and only forwards to your VPS API.
+// Do NOT put DB code here.
 
-const dbPath = process.env.DATABASE_PATH || "/var/lib/hirepro/app.db";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Get client IP from reverse proxy headers
-function getClientIp(req: Request) {
-  const xfwd = req.headers.get("x-forwarded-for");
-  if (xfwd) return xfwd.split(",")[0].trim();
-  return (
-    req.headers.get("x-real-ip") ||
-    req.headers.get("cf-connecting-ip") ||
-    req.headers.get("x-client-ip") ||
-    ""
-  );
+// If env has a trailing slash, remove it.
+const UPSTREAM =
+  (process.env.NEXT_PUBLIC_API_BASE || "https://api.hirepr0.com").replace(/\/+$/, "");
+
+// --- CORS preflight (browser calls OPTIONS before POST) ---
+export async function OPTIONS() {
+  // We don't set CORS headers here because the request is same-origin:
+  // browser -> your own domain -> proxy -> VPS. 204 is enough.
+  return new Response(null, { status: 204 });
 }
 
-// (Optional) tiny migration to ensure 'ip' column exists
-function ensureIpColumn(db: Database.Database) {
-  const cols = db.prepare("PRAGMA table_info(leads)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "ip")) {
-    db.prepare("ALTER TABLE leads ADD COLUMN ip TEXT").run();
-  }
-}
-
-type LeadRow = { work_code?: string } | undefined;
-
+// --- Forward POST to your real backend ---
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    // Forward the raw body so we don’t change the payload format
+    const body = await req.text();
 
-    if (!body?.phoneE164) {
-      return NextResponse.json(
-        { ok: false, error: "Missing phone number" },
-        { status: 400 }
-      );
-    }
+    // Forward a minimal set of headers. Content-Type is important.
+    const headers: Record<string, string> = {};
+    const contentType = req.headers.get("content-type");
+    if (contentType) headers["content-type"] = contentType;
 
-    const db = new Database(dbPath);
-    ensureIpColumn(db);
+    // If you ever add auth to your backend, you can pass it through:
+    const auth = req.headers.get("authorization");
+    if (auth) headers["authorization"] = auth;
 
-    const ip = getClientIp(req);
+    const upstreamRes = await fetch(`${UPSTREAM}/api/lead`, {
+      method: "POST",
+      headers,
+      body,
+      // Important: disable Next’s caching and ensure a real network call
+      cache: "no-store",
+    });
 
-    // If this phone already has a code, reuse it
-    const existing = db
-      .prepare("SELECT work_code FROM leads WHERE phone_e164 = ?")
-      .get(body.phoneE164) as LeadRow;
+    // Stream/return upstream response as-is
+    const text = await upstreamRes.text();
 
-    let workCode: string;
-
-    if (existing?.work_code) {
-      workCode = existing.work_code;
-    } else {
-      workCode = crypto.randomBytes(3).toString("hex").toUpperCase();
-
-      db.prepare(
-        `INSERT INTO leads
-         (phone_e164, work_code, name, email, gender, age, country_iso, dial, note, ip)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        body.phoneE164,
-        workCode,
-        body.name || "",
-        body.email || "",
-        body.gender || "",
-        Number(body.age) || 0,
-        body.countryIso || "",
-        body.dial || "",
-        body.note || "",
-        ip
-      );
-    }
-
-    db.close();
-    return NextResponse.json({ ok: true, workCode });
+    return new Response(text, {
+      status: upstreamRes.status,
+      headers: {
+        "content-type": upstreamRes.headers.get("content-type") || "application/json",
+      },
+    });
   } catch (err: any) {
-    console.error("Lead insert error:", err);
-    return NextResponse.json(
-      { ok: false, error: err?.message || "Server error" },
-      { status: 500 }
+    // Keep the site responsive and return JSON error (no 502 page)
+    return new Response(
+      JSON.stringify({ ok: false, error: err?.message || "Proxy error" }),
+      { status: 200, headers: { "content-type": "application/json" } }
     );
   }
-}
-
-// CORS preflight (Nginx adds headers; 204 is enough)
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204 });
 }
