@@ -1,57 +1,98 @@
-// app/api/lead/route.ts
-// Proxy /api/lead from the website (Vercel) to your real API on the VPS.
-// This keeps the browser same-origin → no CORS headaches.
+import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+import Database from "better-sqlite3";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+const DB_PATH = "/var/lib/hirepro/app.db";
 
-// Where to forward: https://api.hirepr0.com
-const UPSTREAM =
-  (process.env.API_BASE || "https://api.hirepr0.com").replace(/\/+$/, "");
-
-// --- CORS preflight (browser calls OPTIONS before POST) ---
-export async function OPTIONS() {
-  // Because the browser is calling *this* route on the same origin (hirepr0.com),
-  // we do not need to emit Access-Control-Allow-* headers here.
-  // A bare 204 is enough to satisfy preflight.
-  return new Response(null, { status: 204 });
+function ok(data: any) {
+  return NextResponse.json({ ok: true, ...data }, { status: 200 });
+}
+function err(message: string, status = 500) {
+  return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-// --- Forward POST to your real backend ---
-export async function POST(req: Request) {
+function safeString(v: any): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function clientIpFromHeaders(req: NextRequest): string | null {
+  // Prefer X-Forwarded-For chain, then X-Real-IP, then req.ip-like sources.
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) {
+    const first = fwd.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  // As a last resort, NextRequest doesn't expose raw socket IP reliably here.
+  return null;
+}
+
+export async function OPTIONS() {
+  // Let Nginx handle CORS headers, just return 204 here.
+  return new NextResponse(null, { status: 204 });
+}
+
+export async function POST(req: NextRequest) {
+  let db: Database.Database | null = null;
   try {
-    // Pass the raw body so payload formatting is unchanged
-    const body = await req.text();
+    const body = await req.json();
 
-    // Forward a minimal set of headers. Content-Type is important.
-    const headers: Record<string, string> = {};
-    const contentType = req.headers.get("content-type");
-    if (contentType) headers["content-type"] = contentType;
+    const name = safeString(body?.name);
+    const email = safeString(body?.email);
+    const countryIso = safeString(body?.countryIso);
+    const dial = safeString(body?.dial);
+    const phone = safeString(body?.phone);
+    const phoneE164 = safeString(body?.phoneE164);
+    const gender = safeString(body?.gender);
+    const note = body?.note ? safeString(body.note) : null;
 
-    // If you ever add auth to your backend, you can pass it through:
-    const auth = req.headers.get("authorization");
-    if (auth) headers["authorization"] = auth;
+    // 1) Prefer browser-captured IP, else fall back to headers
+    const ipFromBrowser = safeString(body?.ip);
+    const ip =
+      ipFromBrowser ||
+      clientIpFromHeaders(req) ||
+      null; // store null if unknown, but we do our best
 
-    const upstreamRes = await fetch(`${UPSTREAM}/api/lead`, {
-      method: "POST",
-      headers,
-      body,
-    });
+    if (!phoneE164) return err("phoneE164 is required", 400);
 
-    // Stream/return upstream response as-is
-    const text = await upstreamRes.text();
-    return new Response(text, {
-      status: upstreamRes.status,
-      headers: {
-        "content-type":
-          upstreamRes.headers.get("content-type") || "application/json",
-      },
-    });
-  } catch (err: any) {
-    // Return a JSON error (still same-origin to the browser)
-    return new Response(
-      JSON.stringify({ ok: false, error: err?.message || "Proxy error" }),
-      { status: 502, headers: { "content-type": "application/json" } }
+    db = new Database(DB_PATH, { fileMustExist: true });
+
+    // If the phone already exists, reuse its work_code
+    const getStmt = db.prepare(
+      "SELECT id, work_code FROM leads WHERE phone_e164 = ? ORDER BY id DESC LIMIT 1"
     );
+    const existing = getStmt.get(phoneE164) as { id: number; work_code: string } | undefined;
+
+    let workCode: string;
+    if (existing) {
+      workCode = existing.work_code;
+    } else {
+      workCode = crypto.randomBytes(3).toString("hex").toUpperCase(); // e.g., "FA1B22"
+
+      db.prepare(
+        `INSERT INTO leads
+          (phone_e164, work_code, name, email, gender, age, country_iso, dial, note, ip, created_at)
+         VALUES
+          (?,          ?,         ?,    ?,     ?,      ?,   ?,           ?,    ?,   ?,  datetime('now'))`
+      ).run(
+        phoneE164,
+        workCode,
+        name || null,
+        email || null,
+        gender || null,
+        body?.age ?? null,
+        countryIso || null,
+        dial || null,
+        note,
+        ip || null
+      );
+    }
+
+    return ok({ workCode });
+  } catch (e: any) {
+    return err(e?.message || "Server error");
+  } finally {
+    if (db) db.close();
   }
 }
