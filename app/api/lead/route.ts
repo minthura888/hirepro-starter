@@ -16,7 +16,6 @@ function safeString(v: any): string {
 }
 
 function clientIpFromHeaders(req: NextRequest): string | null {
-  // Prefer X-Forwarded-For chain, then X-Real-IP, then req.ip-like sources.
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) {
     const first = fwd.split(",")[0]?.trim();
@@ -24,12 +23,11 @@ function clientIpFromHeaders(req: NextRequest): string | null {
   }
   const real = req.headers.get("x-real-ip");
   if (real) return real.trim();
-  // As a last resort, NextRequest doesn't expose raw socket IP reliably here.
   return null;
 }
 
 export async function OPTIONS() {
-  // Let Nginx handle CORS headers, just return 204 here.
+  // Nginx adds CORS headers; we just acknowledge preflight.
   return new NextResponse(null, { status: 204 });
 }
 
@@ -47,28 +45,27 @@ export async function POST(req: NextRequest) {
     const gender = safeString(body?.gender);
     const note = body?.note ? safeString(body.note) : null;
 
-    // 1) Prefer browser-captured IP, else fall back to headers
+    // Prefer browser-captured IP; else take it from proxy headers.
     const ipFromBrowser = safeString(body?.ip);
-    const ip =
-      ipFromBrowser ||
-      clientIpFromHeaders(req) ||
-      null; // store null if unknown, but we do our best
+    const ip = ipFromBrowser || clientIpFromHeaders(req) || null;
 
     if (!phoneE164) return err("phoneE164 is required", 400);
 
     db = new Database(DB_PATH, { fileMustExist: true });
 
-    // If the phone already exists, reuse its work_code
+    // Reuse work_code for existing phone, otherwise create a new one.
     const getStmt = db.prepare(
       "SELECT id, work_code FROM leads WHERE phone_e164 = ? ORDER BY id DESC LIMIT 1"
     );
-    const existing = getStmt.get(phoneE164) as { id: number; work_code: string } | undefined;
+    const existing = getStmt.get(phoneE164) as
+      | { id: number; work_code: string }
+      | undefined;
 
     let workCode: string;
     if (existing) {
       workCode = existing.work_code;
     } else {
-      workCode = crypto.randomBytes(3).toString("hex").toUpperCase(); // e.g., "FA1B22"
+      workCode = crypto.randomBytes(3).toString("hex").toUpperCase();
 
       db.prepare(
         `INSERT INTO leads
