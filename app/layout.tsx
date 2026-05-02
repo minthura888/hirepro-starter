@@ -1,26 +1,21 @@
 // app/layout.tsx
-import "./globals.css";
-import type { Metadata } from "next";
-import MetaPixel from "@/components/MetaPixel";
-import PixelRouteTracker from "./components/PixelRouteTracker";
-import { Suspense } from "react";
+import './globals.css';
+import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: "HirePro Starter",
-  description: "Grab your jobs",
+  title: 'HirePro Türkiye | Online İş Fırsatları',
+  description:
+    'HirePro ile Türkiye’de online yarı zamanlı ve tam zamanlı iş fırsatlarını keşfedin. Evden çalışın ve günlük kazanç elde edin.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body>
-        <MetaPixel />
-        {/* Next.js requires a suspense boundary around useSearchParams/usePathname */}
-        <Suspense fallback={null}>
-          <PixelRouteTracker />
-        </Suspense>
-        {children}
-      </body>
+    <html lang="tr">
+      <body>{children}</body>
     </html>
   );
 }
