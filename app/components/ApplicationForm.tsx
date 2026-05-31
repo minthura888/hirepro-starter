@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import React, { useMemo, useState } from 'react';
@@ -30,9 +31,18 @@ const COUNTRIES = [
 ];
 
 const isMobile = () =>
-  /iPhone|iPad|iPod|Android/i.test(typeof navigator === 'undefined' ? '' : navigator.userAgent);
+  /iPhone|iPad|iPod|Android/i.test(
+    typeof navigator === 'undefined' ? '' : navigator.userAgent
+  );
 
-const onlyDigits = (v: string) => v.replace(/\D+/g, '');
+const onlyDigits = (value: string) => value.replace(/\D+/g, '');
+
+type LeadApiResponse = {
+  ok?: boolean;
+  workCode?: string;
+  isNew?: boolean;
+  error?: string;
+};
 
 export default function ApplicationForm() {
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
@@ -40,69 +50,19 @@ export default function ApplicationForm() {
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [age, setAge] = useState<string>('');
-  const [email, setEmail] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const phoneE164 = useMemo(() => {
-    const cc = onlyDigits(selectedCountry.dial);
-    const local = onlyDigits(phone);
-    return cc && local ? `+${cc}${local}` : '';
+    const countryCode = onlyDigits(selectedCountry.dial);
+    const localNumber = onlyDigits(phone);
+
+    return countryCode && localNumber ? `+${countryCode}${localNumber}` : '';
   }, [selectedCountry, phone]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setOkMsg(null);
-
-    const ageNum = Number(age || '0');
-
-    if (!name.trim()) return setError('Lütfen adınızı girin.');
-    if (!email.trim()) return setError('Lütfen geçerli bir e-posta adresi girin.');
-    if (!phoneE164) return setError('Lütfen Telegram telefon numaranızı girin.');
-    if (!ageNum || ageNum < 16 || ageNum > 99) {
-      return setError('Lütfen geçerli bir yaş girin. Yaş aralığı: 16–99.');
-    }
-
-    const payload = {
-      name: name.trim(),
-      email: email.trim(),
-      countryIso: selectedCountry.iso,
-      dial: selectedCountry.dial,
-      phone: onlyDigits(phone),
-      phoneE164,
-      gender,
-      age: ageNum,
-      note: null as string | null,
-    };
-
-    try {
-      fbqTrack('Lead', { action: 'form_submit' });
-    } catch {}
-
-    setSaving(true);
-    setOkMsg('Kaydedildi! Telegram açılıyor…');
-
-    const url = '/api/lead';
-
-    try {
-      const body = JSON.stringify(payload);
-
-      if ('sendBeacon' in navigator) {
-        navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
-      } else {
-        fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          // @ts-ignore
-          keepalive: true,
-        });
-      }
-    } catch {}
-
+  const openTelegram = () => {
     const tgWeb = `https://t.me/${BOT_USERNAME}`;
     const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
     const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
@@ -133,6 +93,73 @@ export default function ApplicationForm() {
     }, 120);
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (saving) return;
+
+    setError(null);
+    setOkMsg(null);
+
+    const ageNum = Number(age || '0');
+
+    if (!name.trim()) {
+      return setError('Lütfen adınızı girin.');
+    }
+
+    if (!phoneE164) {
+      return setError('Lütfen Telegram telefon numaranızı girin.');
+    }
+
+    if (!ageNum || ageNum < 16 || ageNum > 99) {
+      return setError('Lütfen geçerli bir yaş girin. Yaş aralığı: 16–99.');
+    }
+
+    const payload = {
+      name: name.trim(),
+      email: '',
+      countryIso: selectedCountry.iso,
+      dial: selectedCountry.dial,
+      phone: onlyDigits(phone),
+      phoneE164,
+      gender,
+      age: ageNum,
+      note: null as string | null,
+    };
+
+    setSaving(true);
+
+    try {
+      const response = await fetch('/api/lead', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json().catch(() => null)) as LeadApiResponse | null;
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Başvuru kaydedilemedi.');
+      }
+
+      if (data.isNew === true) {
+        try {
+          fbqTrack('Lead', { action: 'form_submit' });
+        } catch {
+          // The application was saved even if the pixel cannot be sent.
+        }
+      }
+
+      setOkMsg('Kaydedildi! Telegram açılıyor…');
+      openTelegram();
+    } catch {
+      setSaving(false);
+      setError('Başvurunuz kaydedilemedi. Lütfen tekrar deneyin.');
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="mt-6">
       <div className="p-6 md:p-8 rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -158,13 +185,15 @@ export default function ApplicationForm() {
           <select
             value={selectedCountry.iso}
             onChange={(e) =>
-              setSelectedCountry(COUNTRIES.find((c) => c.iso === e.target.value) || COUNTRIES[0])
+              setSelectedCountry(
+                COUNTRIES.find((country) => country.iso === e.target.value) || COUNTRIES[0]
+              )
             }
             className="col-span-3 h-12 rounded-xl border border-slate-300 px-3 bg-white focus:outline-none focus:ring-4 focus:ring-blue-100"
           >
-            {COUNTRIES.map((c) => (
-              <option key={c.iso} value={c.iso}>
-                {c.dial} — {c.name}
+            {COUNTRIES.map((country) => (
+              <option key={country.iso} value={country.iso}>
+                {country.dial} — {country.name}
               </option>
             ))}
           </select>
@@ -218,15 +247,6 @@ export default function ApplicationForm() {
           className="mt-2 w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-blue-100"
         />
 
-        <label className="block text-sm font-medium text-slate-700 mt-6">* E-posta</label>
-        <input
-          type="email"
-          placeholder="ornek@email.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mt-2 w-full h-12 rounded-xl border border-slate-300 px-3 focus:outline-none focus:ring-4 focus:ring-blue-100"
-        />
-
         <button
           type="submit"
           disabled={saving}
@@ -236,8 +256,13 @@ export default function ApplicationForm() {
         </button>
 
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-        {okMsg && <p id="apply-status" className="mt-4 text-sm text-green-600">{okMsg}</p>}
+        {okMsg && (
+          <p id="apply-status" className="mt-4 text-sm text-green-600">
+            {okMsg}
+          </p>
+        )}
       </div>
     </form>
   );
 }
+```
