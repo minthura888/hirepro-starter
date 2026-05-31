@@ -144,7 +144,7 @@ export default function ApplicationForm() {
 
       if (data.isNew === true) {
         try {
-          fbqTrack('Lead', { action: 'form_submit' });
+          fbqTrack('CompleteRegistration', { action: 'unique_phone_submit' });
         } catch {
           // Başvuru kaydedilmişse, piksel gönderilemese bile kullanıcı devam eder.
         }
