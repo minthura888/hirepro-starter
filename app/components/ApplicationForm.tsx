@@ -269,7 +269,5 @@ Lütfen Telegram’da kullandığınız telefon numarasını girin. </p>
     )}
   </div>
 </form>
-```
-
 );
 }
