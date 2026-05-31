@@ -53,7 +53,7 @@ export default function Page() {
       </header>
 
       <section className="relative bg-[var(--brand-muted)]">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-16">
           <h1 className="text-4xl sm:text-5xl font-bold leading-tight tracking-tight text-[var(--brand)]">
             İşinizi hemen alın
           </h1>
