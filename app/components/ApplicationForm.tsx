@@ -48,7 +48,7 @@ const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
 const [name, setName] = useState('');
 const [phone, setPhone] = useState('');
 const [gender, setGender] = useState<'male' | 'female'>('male');
-const [age, setAge] = useState<string>('');
+const [age, setAge] = useState('');
 
 const [saving, setSaving] = useState(false);
 const [error, setError] = useState<string | null>(null);
@@ -58,18 +58,15 @@ const phoneE164 = useMemo(() => {
 const countryCode = onlyDigits(selectedCountry.dial);
 const localNumber = onlyDigits(phone);
 
-```
 return countryCode && localNumber ? `+${countryCode}${localNumber}` : '';
-```
 
 }, [selectedCountry, phone]);
 
 const openTelegram = () => {
-const tgWeb = `https://t.me/${BOT_USERNAME}`;
-const tgApp = `tg://resolve?domain=${BOT_USERNAME}`;
-const tgIntent = `intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end`;
+const tgWeb = https://t.me/${BOT_USERNAME};
+const tgApp = tg://resolve?domain=${BOT_USERNAME};
+const tgIntent = intent://resolve?domain=${BOT_USERNAME}#Intent;scheme=tg;package=org.telegram.messenger;end;
 
-```
 setTimeout(() => {
   if (isMobile()) {
     location.href = tgApp;
@@ -94,14 +91,12 @@ setTimeout(() => {
     window.open(tgWeb, '_blank', 'noopener,noreferrer');
   }
 }, 120);
-```
 
 };
 
 const handleSubmit = async (e: React.FormEvent) => {
 e.preventDefault();
 
-```
 if (saving) return;
 
 setError(null);
@@ -164,15 +159,18 @@ try {
   setSaving(false);
   setError('Başvurunuz kaydedilemedi. Lütfen tekrar deneyin.');
 }
-```
 
 };
 
-return ( <form onSubmit={handleSubmit} className="mt-6"> <div className="p-6 md:p-8 rounded-2xl border border-slate-200 bg-white shadow-sm"> <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
-İşe alım ekibimiz başvuru sahipleriyle Telegram üzerinden iletişime geçecektir.
-Lütfen Telegram’da kullandığınız telefon numarasını girin. </p>
+return (
 
-```
+
+
+İşe alım ekibimiz başvuru sahipleriyle Telegram üzerinden iletişime geçecektir.
+Lütfen Telegram’da kullandığınız telefon numarasını girin.
+
+
+
     <label className="block text-sm font-medium text-slate-700 mt-2">* Adınız</label>
     <input
       type="text"
@@ -269,5 +267,6 @@ Lütfen Telegram’da kullandığınız telefon numarasını girin. </p>
     )}
   </div>
 </form>
+
 );
 }
