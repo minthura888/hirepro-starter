@@ -36,6 +36,27 @@ const isMobile = () =>
 
 const onlyDigits = (value: string) => value.replace(/\D+/g, '');
 
+const normalizeLocalPhone = (dial: string, value: string) => {
+  const countryCode = onlyDigits(dial);
+  let localNumber = onlyDigits(value);
+
+  while (localNumber.startsWith('00')) {
+    localNumber = localNumber.slice(2);
+  }
+
+  if (
+    countryCode &&
+    localNumber.startsWith(countryCode) &&
+    localNumber.length > countryCode.length
+  ) {
+    localNumber = localNumber.slice(countryCode.length);
+  }
+
+  localNumber = localNumber.replace(/^0+/, '');
+
+  return localNumber;
+};
+
 type LeadApiResponse = {
   ok?: boolean;
   workCode?: string;
@@ -54,11 +75,15 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
+  const phoneLocalNumber = useMemo(
+    () => normalizeLocalPhone(selectedCountry.dial, phone),
+    [selectedCountry, phone]
+  );
+
   const phoneE164 = useMemo(() => {
     const countryCode = onlyDigits(selectedCountry.dial);
-    const localNumber = onlyDigits(phone);
-    return countryCode && localNumber ? `+${countryCode}${localNumber}` : '';
-  }, [selectedCountry, phone]);
+    return countryCode && phoneLocalNumber ? `+${countryCode}${phoneLocalNumber}` : '';
+  }, [selectedCountry, phoneLocalNumber]);
 
   const openTelegram = () => {
     const tgWeb = `https://t.me/${BOT_USERNAME}`;
@@ -118,7 +143,7 @@ export default function ApplicationForm() {
       email: '',
       countryIso: selectedCountry.iso,
       dial: selectedCountry.dial,
-      phone: onlyDigits(phone),
+      phone: phoneLocalNumber,
       phoneE164,
       gender,
       age: ageNum,
