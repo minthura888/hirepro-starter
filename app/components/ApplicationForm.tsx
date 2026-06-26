@@ -134,8 +134,8 @@ export default function ApplicationForm() {
       return setError('Lütfen Telegram telefon numaranızı girin.');
     }
 
-    if (!ageNum || ageNum < 16 || ageNum > 99) {
-      return setError('Lütfen geçerli bir yaş girin. Yaş aralığı: 16–99.');
+    if (!ageNum || ageNum < 23 || ageNum > 99) {
+      return setError('Lütfen geçerli bir yaş girin. Yaş aralığı: 23–99.');
     }
 
     const payload = {
@@ -263,7 +263,7 @@ export default function ApplicationForm() {
         <label className="block text-sm font-medium text-slate-700 mt-6">* Yaş</label>
         <input
           type="number"
-          min={16}
+          min={23}
           max={99}
           placeholder="Yaşınızı yazın"
           value={age}
