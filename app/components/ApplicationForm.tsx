@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { fbqTrack } from '@/lib/pixel';
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || 'applyyourjob_bot';
+const ATTRIBUTION_STORAGE_KEY = 'hirepro_meta_attribution_v1';
 
 const COUNTRIES = [
   { iso: 'tr', name: 'Türkiye', dial: '+90' },
@@ -28,6 +29,27 @@ const COUNTRIES = [
   { iso: 'ae', name: 'Birleşik Arap Emirlikleri', dial: '+971' },
   { iso: 'sg', name: 'Singapur', dial: '+65' },
 ];
+
+type AttributionData = {
+  fbp: string;
+  fbc: string;
+  fbclid: string;
+  campaignId: string;
+  campaignName: string;
+  adsetId: string;
+  adsetName: string;
+  adId: string;
+  adName: string;
+  clientUserAgent: string;
+  eventSourceUrl: string;
+};
+
+type LeadApiResponse = {
+  ok?: boolean;
+  workCode?: string;
+  isNew?: boolean;
+  error?: string;
+};
 
 const isMobile = () =>
   /iPhone|iPad|iPod|Android/i.test(
@@ -57,11 +79,75 @@ const normalizeLocalPhone = (dial: string, value: string) => {
   return localNumber;
 };
 
-type LeadApiResponse = {
-  ok?: boolean;
-  workCode?: string;
-  isNew?: boolean;
-  error?: string;
+const emptyAttribution = (): AttributionData => ({
+  fbp: '',
+  fbc: '',
+  fbclid: '',
+  campaignId: '',
+  campaignName: '',
+  adsetId: '',
+  adsetName: '',
+  adId: '',
+  adName: '',
+  clientUserAgent: '',
+  eventSourceUrl: '',
+});
+
+const readCookie = (name: string) => {
+  if (typeof document === 'undefined') return '';
+
+  const prefix = `${name}=`;
+  const cookie = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : '';
+};
+
+const readStoredAttribution = (): AttributionData => {
+  if (typeof window === 'undefined') return emptyAttribution();
+
+  try {
+    const raw = window.sessionStorage.getItem(ATTRIBUTION_STORAGE_KEY);
+    if (!raw) return emptyAttribution();
+
+    const parsed = JSON.parse(raw) as Partial<AttributionData>;
+
+    return {
+      ...emptyAttribution(),
+      ...parsed,
+    };
+  } catch {
+    return emptyAttribution();
+  }
+};
+
+const createFbcFromFbclid = (fbclid: string) =>
+  fbclid ? `fb.1.${Date.now()}.${fbclid}` : '';
+
+const collectAttribution = (): AttributionData => {
+  if (typeof window === 'undefined') return emptyAttribution();
+
+  const stored = readStoredAttribution();
+  const params = new URLSearchParams(window.location.search);
+
+  const fbclid = params.get('fbclid')?.trim() || stored.fbclid;
+  const cookieFbc = readCookie('_fbc');
+
+  return {
+    fbp: readCookie('_fbp') || stored.fbp,
+    fbc: cookieFbc || stored.fbc || createFbcFromFbclid(fbclid),
+    fbclid,
+    campaignId: params.get('campaign_id')?.trim() || stored.campaignId,
+    campaignName: params.get('campaign_name')?.trim() || stored.campaignName,
+    adsetId: params.get('adset_id')?.trim() || stored.adsetId,
+    adsetName: params.get('adset_name')?.trim() || stored.adsetName,
+    adId: params.get('ad_id')?.trim() || stored.adId,
+    adName: params.get('ad_name')?.trim() || stored.adName,
+    clientUserAgent: navigator.userAgent || stored.clientUserAgent,
+    eventSourceUrl: stored.eventSourceUrl || window.location.href,
+  };
 };
 
 export default function ApplicationForm() {
@@ -74,6 +160,17 @@ export default function ApplicationForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(
+        ATTRIBUTION_STORAGE_KEY,
+        JSON.stringify(collectAttribution())
+      );
+    } catch {
+      // Tracking storage failure must never block the application form.
+    }
+  }, []);
 
   const phoneLocalNumber = useMemo(
     () => normalizeLocalPhone(selectedCountry.dial, phone),
@@ -138,6 +235,8 @@ export default function ApplicationForm() {
       return setError('Lütfen geçerli bir yaş girin. Yaş aralığı: 23–99.');
     }
 
+    const attribution = collectAttribution();
+
     const payload = {
       name: name.trim(),
       email: '',
@@ -148,6 +247,18 @@ export default function ApplicationForm() {
       gender,
       age: ageNum,
       note: null as string | null,
+
+      // Meta matching and ad attribution
+      fbp: attribution.fbp,
+      fbc: attribution.fbc,
+      campaignId: attribution.campaignId,
+      campaignName: attribution.campaignName,
+      adsetId: attribution.adsetId,
+      adsetName: attribution.adsetName,
+      adId: attribution.adId,
+      adName: attribution.adName,
+      clientUserAgent: attribution.clientUserAgent,
+      eventSourceUrl: attribution.eventSourceUrl,
     };
 
     setSaving(true);
