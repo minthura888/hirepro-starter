@@ -188,44 +188,44 @@ export default function ApplicationForm() {
   };
 
   const fieldClass =
-    "mt-1.5 w-full h-11 rounded-xl border border-[#59616b] bg-[#0f1216] px-3 text-[#f5f5f5] placeholder:text-[#737983] shadow-inner transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-12";
+    "mt-1.5 w-full h-11 rounded-xl border border-[#e8cfc3] bg-white px-3 text-[#3f2d28] placeholder:text-[#b29b91] shadow-sm transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-12";
 
   return (
     <form id="apply" onSubmit={handleSubmit} className="mx-auto w-full max-w-3xl scroll-mt-20">
-      <div className="rounded-2xl border border-[#3c434b] bg-[var(--surface)] p-4 shadow-2xl shadow-black/20 sm:p-6">
-        <div className="mb-4 rounded-xl border border-[#5c4b12] bg-[#1a1710] px-3.5 py-2.5 text-xs leading-relaxed text-[#e6d9a9] sm:px-4 sm:py-3 sm:text-sm">
+      <div className="rounded-2xl border border-[#ecd8cf] bg-white p-4 shadow-xl shadow-orange-100/50 sm:p-6">
+        <div className="mb-4 rounded-xl border border-[#f0c8b4] bg-[#fff2eb] px-3.5 py-2.5 text-xs leading-relaxed text-[#8a5c48] sm:px-4 sm:py-3 sm:text-sm">
           İşe alım ekibimiz seçilen adaylarla Telegram üzerinden iletişim kurar. Telegram hesabınıza bağlı bir telefon numarası kullanın.
         </div>
 
-        <label className="block text-sm font-semibold text-[#e8e8e8]">* Ad Soyad</label>
+        <label className="block text-sm font-semibold text-[#4d3730]">* Ad Soyad</label>
         <input type="text" placeholder="Adınızı girin" value={name} disabled={submitted} onChange={(e) => setName(e.target.value)} className={fieldClass} />
 
-        <label className="mt-4 block text-sm font-semibold text-[#e8e8e8]">* Telegram telefon numarası</label>
+        <label className="mt-4 block text-sm font-semibold text-[#4d3730]">* Telegram telefon numarası</label>
         <div className="mt-1.5 grid grid-cols-[0.95fr_1.05fr] gap-2 sm:grid-cols-10 sm:gap-3">
           <select
             value={selectedCountry.iso}
             disabled={submitted}
             onChange={(e) => setSelectedCountry(COUNTRIES.find((country) => country.iso === e.target.value) || COUNTRIES[0])}
-            className="h-11 min-w-0 rounded-xl border border-[#59616b] bg-[#0f1216] px-2.5 text-sm text-[#f5f5f5] shadow-inner transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-4 sm:h-12 sm:px-3"
+            className="h-11 min-w-0 rounded-xl border border-[#e8cfc3] bg-white px-2.5 text-sm text-[#3f2d28] shadow-sm transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-4 sm:h-12 sm:px-3"
           >
             {COUNTRIES.map((country) => (
               <option key={country.iso} value={country.iso}>{country.flag} {country.name} · {country.dial}</option>
             ))}
           </select>
-          <input type="tel" inputMode="numeric" placeholder="Telefon numaranızı girin" value={phone} disabled={submitted} onChange={(e) => setPhone(e.target.value)} className="h-11 min-w-0 rounded-xl border border-[#59616b] bg-[#0f1216] px-2.5 text-sm text-[#f5f5f5] placeholder:text-[#737983] shadow-inner transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-6 sm:h-12 sm:px-3" />
+          <input type="tel" inputMode="numeric" placeholder="Telefon numaranızı girin" value={phone} disabled={submitted} onChange={(e) => setPhone(e.target.value)} className="h-11 min-w-0 rounded-xl border border-[#e8cfc3] bg-white px-2.5 text-sm text-[#3f2d28] placeholder:text-[#b29b91] shadow-sm transition focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)] disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-6 sm:h-12 sm:px-3" />
         </div>
-        <p className="mt-1.5 text-[11px] text-[#8f959e] sm:text-xs">
+        <p className="mt-1.5 text-[11px] text-[#8a756e] sm:text-xs">
           Bu numara Telegram doğrulaması için kullanılacaktır:&nbsp;
-          <strong className="text-[#c9cdd2]">{phoneE164 || "—"}</strong>
+          <strong className="text-[#5a4038]">{phoneE164 || "—"}</strong>
         </p>
 
-        <label className="mt-4 block text-sm font-semibold text-[#e8e8e8]">* Cinsiyet</label>
-        <div className="mt-2 flex flex-wrap items-center gap-5 text-sm text-[#d7d9dc]">
-          <label className="inline-flex items-center gap-2"><input type="radio" name="gender" checked={gender === "male"} disabled={submitted} onChange={() => setGender("male")} className="accent-[#f0b90b]" /><span>Erkek</span></label>
-          <label className="inline-flex items-center gap-2"><input type="radio" name="gender" checked={gender === "female"} disabled={submitted} onChange={() => setGender("female")} className="accent-[#f0b90b]" /><span>Kadın</span></label>
+        <label className="mt-4 block text-sm font-semibold text-[#4d3730]">* Cinsiyet</label>
+        <div className="mt-2 flex flex-wrap items-center gap-5 text-sm text-[#60473f]">
+          <label className="inline-flex items-center gap-2"><input type="radio" name="gender" checked={gender === "male"} disabled={submitted} onChange={() => setGender("male")} className="accent-[#f97316]" /><span>Erkek</span></label>
+          <label className="inline-flex items-center gap-2"><input type="radio" name="gender" checked={gender === "female"} disabled={submitted} onChange={() => setGender("female")} className="accent-[#f97316]" /><span>Kadın</span></label>
         </div>
 
-        <label className="mt-4 block text-sm font-semibold text-[#e8e8e8]">* Yaş</label>
+        <label className="mt-4 block text-sm font-semibold text-[#4d3730]">* Yaş</label>
         <input type="number" min={23} max={99} placeholder="Yaşınızı girin" value={age} disabled={submitted} onChange={(e) => setAge(e.target.value)} className={fieldClass} />
 
         {!submitted && (
@@ -236,15 +236,15 @@ export default function ApplicationForm() {
           </div>
         )}
 
-        {error && <p className="mt-4 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-300">{error}</p>}
+        {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
         {submitted && (
-          <div id="apply-status" className="mt-5 rounded-2xl border border-[#6d5810] bg-[#17140b] p-4 sm:p-5">
+          <div id="apply-status" className="mt-5 rounded-2xl border border-[#f0c6b0] bg-[#fff3ec] p-4 sm:p-5">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[var(--brand)]" />
               <div>
-                <h3 className="m-0 text-base font-semibold text-white">Başvurunuz başarıyla gönderildi</h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#b8bdc5]">
+                <h3 className="m-0 text-base font-semibold text-[#3f2d28]">Başvurunuz başarıyla gönderildi</h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#76645e]">
                   Bilgileriniz kaydedildi. Başvurunuza devam etmek için aşağıdaki düğmeyle Telegram'ı açın. Cihazınızda Telegram'ın yüklü olduğundan emin olun.
                 </p>
               </div>
@@ -254,7 +254,7 @@ export default function ApplicationForm() {
                 <Send className="h-4 w-4" /> Telegram'da devam et
               </button>
             </div>
-            <p className="mt-3 text-center text-xs text-[#8f959e]">Telegram yalnızca bu düğmeye bastığınızda açılır.</p>
+            <p className="mt-3 text-center text-xs text-[#8a756e]">Telegram yalnızca bu düğmeye bastığınızda açılır.</p>
           </div>
         )}
       </div>
