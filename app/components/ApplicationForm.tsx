@@ -76,6 +76,8 @@ export default function ApplicationForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submittedIsNew, setSubmittedIsNew] = useState(false);
+  const [submittedLeadId, setSubmittedLeadId] = useState<number | null>(null);
+  const [submittedPhoneE164, setSubmittedPhoneE164] = useState("");
   const [conversionSent, setConversionSent] = useState(false);
 
   const phoneLocalNumber = useMemo(
@@ -153,6 +155,8 @@ export default function ApplicationForm() {
       }
 
       setSubmittedIsNew(data.isNew === true);
+      setSubmittedLeadId(typeof data.id === "number" ? data.id : null);
+      setSubmittedPhoneE164(data.phone_e164 || phoneE164);
       setSubmitted(true);
       setSaving(false);
     } catch {
@@ -161,10 +165,30 @@ export default function ApplicationForm() {
     }
   };
 
-  const handleTelegramContinue = () => {
+  const handleTelegramContinue = async () => {
     setError(null);
 
     if (!conversionSent) {
+      const eventId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `telegram-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      if (submittedLeadId && submittedPhoneE164) {
+        try {
+          await fetch("/api/lead/continue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              eventId,
+              leadId: submittedLeadId,
+              phoneE164: submittedPhoneE164,
+              isNew: submittedIsNew,
+            }),
+            keepalive: true,
+          });
+        } catch {}
+      }
       try {
         fbqTrack("Lead", { action: "telegram_continue" });
         ttqTrack("SubmitForm", { action: "telegram_continue" });
